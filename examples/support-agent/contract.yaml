@@ -1,0 +1,47 @@
+apiVersion: axda.dev/v1
+kind: AgentContract
+metadata:
+  name: support-agent
+
+spec:
+  # Delegation to a sub-agent is also an action, so nested invoke_agent spans
+  # are governed by this list too (ADR-002 §6).
+  allowed_tools:
+    - crm.lookup
+    - crm.verify_identity
+    - billing.refund
+    - email.send
+
+  must:
+    # Violation-decidable on a prefix: detectable the moment billing.refund is
+    # attempted with no completed verification before it (ADR-005 §2).
+    - kind: order.requires_precondition
+      action: billing.refund
+      precondition: crm.verify_identity
+
+    - kind: tool.call_limit
+      tool: billing.refund
+      max: 1
+
+    - kind: budget.max_steps
+      value: 20
+
+    - kind: budget.max_tool_errors
+      value: 0
+
+    # Requires has_token_usage; reports SKIPPED, never PASS, when the trace
+    # carries no gen_ai.usage.* attributes.
+    - kind: budget.max_tokens
+      value: 50000
+
+  must_not:
+    # Sending an address to email.send is the job. Policies express where PII
+    # may travel, not merely whether it appears (ADR-003 §2).
+    - kind: content.no_pii
+      types: [card, ssn, email]
+      allow_in_tool_args: [email.send, crm.lookup]
+
+    - kind: content.deny_patterns
+      patterns:
+        - '(?i)\bpassword\s*[:=]'
+        - '(?i)\bapi[_-]?key\s*[:=]'

@@ -1,0 +1,279 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "support-agent"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "aws-opentelemetry-distro"
+          },
+          "spans": [
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000001",
+              "name": "invoke_agent support-agent",
+              "startTimeUnixNano": "1754200000000000000",
+              "endTimeUnixNano": "1754200005100000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support-agent"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "aws.bedrock"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "sess-violating-0002"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            },
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000002",
+              "name": "chat anthropic.claude-sonnet-5",
+              "startTimeUnixNano": "1754200000015000000",
+              "endTimeUnixNano": "1754200000705000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "anthropic.claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "aws.bedrock"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000003",
+              "name": "execute_tool crm.lookup",
+              "startTimeUnixNano": "1754200000730000000",
+              "endTimeUnixNano": "1754200000990000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "crm.lookup"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000004",
+              "name": "execute_tool billing.refund",
+              "startTimeUnixNano": "1754200001020000000",
+              "endTimeUnixNano": "1754200001960000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "billing.refund"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000005",
+              "name": "execute_tool internal.debug_dump",
+              "startTimeUnixNano": "1754200002000000000",
+              "endTimeUnixNano": "1754200002180000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "internal.debug_dump"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000006",
+              "name": "execute_tool email.send",
+              "startTimeUnixNano": "1754200002210000000",
+              "endTimeUnixNano": "1754200002510000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "email.send"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_ERROR",
+                "message": "upstream 503 from mail gateway"
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000007",
+              "name": "chat anthropic.claude-sonnet-5",
+              "startTimeUnixNano": "1754200002540000000",
+              "endTimeUnixNano": "1754200003360000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "anthropic.claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "aws.bedrock"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "b73d1a95c04e28f761b3d9e07a2c4518",
+              "spanId": "0000000000000008",
+              "name": "chat anthropic.claude-sonnet-5",
+              "startTimeUnixNano": "1754200003400000000",
+              "endTimeUnixNano": "1754200005000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "anthropic.claude-sonnet-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "aws.bedrock"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "parentSpanId": "0000000000000001"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
