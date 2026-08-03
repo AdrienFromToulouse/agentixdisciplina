@@ -127,17 +127,34 @@ CMD ["opentelemetry-instrument", "python", "-m", "src.agui_server"]
 
 then you are already emitting everything `axda` needs.
 
-**1. Enable CloudWatch Transaction Search** (account-level, once). AgentCore delivers spans to the shared `aws/spans` log group, in OTel semantic-convention format with W3C trace ids, at 100% ingestion.
+**1. Enable CloudWatch Transaction Search** (account-level, once). Spans arrive in OTel semantic-convention format with W3C trace ids, at 100% ingestion.
 
-**2. Turn on content capture**: the only environment variable you add:
+```bash
+aws xray get-trace-segment-destination --region "$REGION"
+# want: {"Destination": "CloudWatchLogs", "Status": "ACTIVE"}
+```
+
+**2. Find which log group holds your spans.** Newly created agents deliver spans to their own log group; older ones use the shared `aws/spans`. Querying the wrong one returns zero events rather than an error, so check first:
+
+```bash
+aws logs describe-log-streams --region "$REGION" \
+  --log-group-name "/aws/bedrock-agentcore/runtimes/<agent-id>-<endpoint>" \
+  --query 'logStreams[].[logStreamName,lastEventTimestamp]' --output text
+```
+
+Read the timestamp, not just the name. A `spans` stream with a real `lastEventTimestamp` means add `--log-group /aws/bedrock-agentcore/runtimes/<agent-id>-<endpoint>` to the commands below. A `spans` stream that exists with a null timestamp means the opposite: this agent delivers to the shared `aws/spans`, and scoping `--log-stream` to that empty stream would return zero events, which looks exactly like an agent that emitted nothing.
+
+**3. Turn on content capture**: the only environment variable you add:
 
 ```
 OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
 ```
 
-Without it, tool and budget clauses still work; content clauses report `SKIP`. Note that with it, prompts and tool arguments land in CloudWatch: set a short retention on the log group.
+Without it, tool and budget clauses still work; content clauses report `SKIP`. Note that with it, prompts and tool arguments land in CloudWatch: set a short retention on the log groups.
 
-**3. Fetch and evaluate:**
+Content does **not** arrive as span attributes. AgentCore writes message bodies to the `otel-rt-logs` stream of the agent's own log group, as OTel log records correlated by trace and span id, so recovering them takes a second query joined onto the span tree. `trace fetch` does this for you and needs no flag for it: the spans name their own content source, so it is read off the trace rather than configured. Two consequences worth knowing — a CI role needs `logs:FilterLogEvents` on **both** groups, and `--no-content` skips the second query at the cost of the content clauses.
+
+**4. Fetch and evaluate:**
 
 ```bash
 ./axda trace fetch --from cloudwatch --session "$SESSION_ID" --out trace.json
@@ -150,20 +167,22 @@ Or in one step:
 ./axda evaluate --contract agent.yaml --from cloudwatch --session "$SESSION_ID"
 ```
 
-> **The span record schema is unverified.** AWS does not publish a stable JSON schema for `aws/spans` records, so the decoder is written defensively against likely field namings. **Run this first:**
+> **The record schemas are unverified.** AWS does not publish a stable JSON schema for span records or content records, so both decoders are written defensively against likely field namings. **Run this first:**
 >
 > ```bash
 > ./axda trace fetch --from cloudwatch --session "$SESSION_ID" --raw | head -50
 > ```
 >
-> If the mapping is wrong, that output is what fixes it.
+> If the mapping is wrong, that output is what fixes it. `--raw` includes the content records for the same reason: their shape is the more likely of the two to differ.
+
+> **An empty result is not proof of an empty trace.** `aws logs filter-log-events` with a `--filter-pattern` over a wide window returns an empty first page plus a `nextToken`, so `--query 'length(events)'` prints `0` for a trace that is present. `axda` paginates and is not affected; hand-written queries alongside it are. Narrow the window before believing an empty result.
 
 ## What works today
 
 | | |
 |---|---|
-| Adapters | `otlp/v1.41` (file or stdin), `cloudwatch-spans/v1` (`aws/spans`) |
-| Trace fetch | CloudWatch by session id or trace id, with settle-polling and `--raw` |
+| Adapters | `otlp/v1.41` (file or stdin), `cloudwatch-spans/v1` (a span log group, joined with the agent's message-content records) |
+| Trace fetch | CloudWatch by session id or trace id, with settle-polling, `--log-group` / `--log-stream`, `--no-content`, and `--raw`; a `--trace-id` bounds the scan to the trace's own window |
 | **Rego** clauses | `tool.allowlist` · `tool.denylist` · `tool.call_limit` · `order.requires_precondition` · `order.before` |
 | **CUE** clauses | `invariants` with declared value bindings · `tool.args_match` · `grounding.cite_sources` |
 | **judge** clauses | `quality.judge` · `quality.helpful` · `quality.on_topic` · `quality.tone` · `grounding.judge`: advisory, cached |

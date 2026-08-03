@@ -22,14 +22,16 @@ import (
 
 // traceFlags are shared by every command that can read a trace.
 type traceFlags struct {
-	trace    string
-	from     string
-	session  string
-	traceID  string
-	region   string
-	logGroup string
-	since    time.Duration
-	wait     time.Duration
+	trace     string
+	from      string
+	session   string
+	traceID   string
+	region    string
+	logGroup  string
+	logStream string
+	noContent bool
+	since     time.Duration
+	wait      time.Duration
 }
 
 func (t *traceFlags) register(c *cobra.Command) {
@@ -40,8 +42,16 @@ func (t *traceFlags) register(c *cobra.Command) {
 	f.StringVar(&t.session, "session", "", "AgentCore runtime session id (with --from)")
 	f.StringVar(&t.traceID, "trace-id", "", "trace id (with --from)")
 	f.StringVar(&t.region, "region", "", "AWS region (defaults to the ambient config)")
-	f.StringVar(&t.logGroup, "log-group", fetch.DefaultLogGroup, "span log group")
-	f.DurationVar(&t.since, "since", 2*time.Hour, "lookback window")
+	f.StringVar(&t.logGroup, "log-group", fetch.DefaultLogGroup,
+		"span log group (per-agent: /aws/bedrock-agentcore/runtimes/<agent-id>-<endpoint>)")
+	f.StringVar(&t.logStream, "log-stream", "",
+		"scope the query to one stream (verify it carries spans before scoping)")
+	f.BoolVar(&t.noContent, "no-content", false,
+		"do not fetch message bodies; content clauses will SKIP")
+	// AgentCore delivers message content as log records in the agent's own log
+	// group, and the content clauses read it from there (ADR-007 §4).
+	f.DurationVar(&t.since, "since", 24*time.Hour,
+		"lookback window (a --trace-id narrows this to the trace's own window)")
 	f.DurationVar(&t.wait, "wait", 30*time.Second, "how long to wait for the span set to settle")
 }
 
@@ -219,13 +229,19 @@ func newTraceFetchCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "fetch",
 		Short: "Fetch a trace from CloudWatch",
-		Long: `Fetch a trace from the CloudWatch aws/spans log group by session or trace id,
-polling until the span set stops growing.
+		Long: `Fetch a trace from a CloudWatch span log group by session or trace id, polling
+until the span set stops growing.
+
+--log-group defaults to the shared aws/spans group. Newly created AgentCore
+agents deliver spans to their own log group instead; querying the wrong one
+returns no events rather than an error, so pass --log-group for those.
 
 AWS does not publish a stable schema for those records, so run --raw first to
 see what your account actually emits.`,
 		Example: `  axda trace fetch --from cloudwatch --session "$SESSION_ID" --out trace.json
-  axda trace fetch --from cloudwatch --session "$SESSION_ID" --raw | head -50`,
+  axda trace fetch --from cloudwatch --session "$SESSION_ID" --raw | head -50
+  axda trace fetch --from cloudwatch --session "$SESSION_ID" \
+    --log-group /aws/bedrock-agentcore/runtimes/my-agent-DEFAULT --log-stream spans`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if tf.from != "cloudwatch" {
@@ -238,14 +254,19 @@ see what your account actually emits.`,
 
 			var payload []byte
 			if raw {
-				payload, err = json.MarshalIndent(res.Records, "", "  ")
+				// --raw exists to show what an account actually emits, so it
+				// has to include the content records: their shape is the one
+				// most likely to differ.
+				payload, err = json.MarshalIndent(append(append(
+					[]json.RawMessage(nil), res.Records...), res.ContentRecords...), "", "  ")
 			} else {
 				payload, err = json.MarshalIndent(envelope{
-					AxdaTrace: "v1",
-					Source:    adapter.AdapterCloudWatch,
-					TraceID:   res.TraceID,
-					Stable:    res.Stable,
-					Records:   res.Records,
+					AxdaTrace:      "v1",
+					Source:         adapter.AdapterCloudWatch,
+					TraceID:        res.TraceID,
+					Stable:         res.Stable,
+					Records:        res.Records,
+					ContentRecords: res.ContentRecords,
 				}, "", "  ")
 			}
 			if err != nil {
@@ -257,12 +278,18 @@ see what your account actually emits.`,
 			} else if err := os.WriteFile(out, append(payload, '\n'), 0o600); err != nil {
 				return fail(err)
 			} else {
-				fmt.Fprintf(cmd.ErrOrStderr(), "wrote %d record(s) for trace %s to %s\n",
-					len(res.Records), res.TraceID, out)
+				fmt.Fprintf(cmd.ErrOrStderr(), "wrote %d span and %d content record(s) for trace %s to %s\n",
+					len(res.Records), len(res.ContentRecords), res.TraceID, out)
 			}
 			if !res.Stable {
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"warning: span set was still growing when --wait expired; this trace may be partial")
+			}
+			// Say so here rather than letting it surface only as skipped
+			// clauses at evaluation time.
+			if len(res.ContentRecords) == 0 && !tf.noContent {
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"warning: no message content found; content and grounding clauses will SKIP")
 			}
 			return nil
 		},
@@ -279,13 +306,18 @@ type envelope struct {
 	TraceID   string            `json:"trace_id"`
 	Stable    bool              `json:"stable"`
 	Records   []json.RawMessage `json:"records"`
+	// ContentRecords carry the message bodies, which arrive as separate log
+	// records rather than span attributes (ADR-007 §4). They travel in the
+	// envelope so that a saved trace evaluates identically to a live fetch.
+	ContentRecords []json.RawMessage `json:"content_records,omitempty"`
 }
 
 func fetchRecords(ctx context.Context, tf *traceFlags) (*fetch.Result, error) {
 	c, err := fetch.New(ctx, fetch.Options{
-		Region: tf.region, LogGroup: tf.logGroup,
+		Region: tf.region, LogGroup: tf.logGroup, LogStream: tf.logStream,
 		Session: tf.session, TraceID: tf.traceID,
-		Since: tf.since, Wait: tf.wait,
+		NoContent: tf.noContent,
+		Since:     tf.since, Wait: tf.wait,
 		Verbose: os.Stderr,
 	})
 	if err != nil {
@@ -294,17 +326,26 @@ func fetchRecords(ctx context.Context, tf *traceFlags) (*fetch.Result, error) {
 	return c.Fetch(ctx)
 }
 
+// episodeFromCloudWatch decodes the span tree and joins the message bodies onto
+// it. Doing the join here, before BuildEpisode, is what lets the Episode model,
+// the evaluators, and the clause registry stay unaware that content arrives out
+// of band.
+func episodeFromCloudWatch(records, content []json.RawMessage) (*episode.Episode, error) {
+	spans, err := adapter.DecodeCloudWatchSpans(records)
+	if err != nil {
+		return nil, err
+	}
+	spans, _ = adapter.MergeContentRecords(spans, content)
+	return adapter.BuildEpisode(spans, adapter.AdapterCloudWatch)
+}
+
 func loadEpisode(ctx context.Context, tf *traceFlags) (*episode.Episode, error) {
 	if tf.from == "cloudwatch" {
 		res, err := fetchRecords(ctx, tf)
 		if err != nil {
 			return nil, err
 		}
-		spans, err := adapter.DecodeCloudWatchSpans(res.Records)
-		if err != nil {
-			return nil, err
-		}
-		return adapter.BuildEpisode(spans, adapter.AdapterCloudWatch)
+		return episodeFromCloudWatch(res.Records, res.ContentRecords)
 	}
 	if tf.from != "" {
 		return nil, fmt.Errorf("--from %q is not supported (use cloudwatch)", tf.from)
@@ -328,11 +369,7 @@ func loadEpisode(ctx context.Context, tf *traceFlags) (*episode.Episode, error) 
 	// anything else is treated as OTLP/JSON.
 	var env envelope
 	if json.Unmarshal(raw, &env) == nil && env.AxdaTrace != "" {
-		spans, err := adapter.DecodeCloudWatchSpans(env.Records)
-		if err != nil {
-			return nil, err
-		}
-		return adapter.BuildEpisode(spans, adapter.AdapterCloudWatch)
+		return episodeFromCloudWatch(env.Records, env.ContentRecords)
 	}
 	spans, err := adapter.DecodeOTLP(bytes.NewReader(raw))
 	if err != nil {

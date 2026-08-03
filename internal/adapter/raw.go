@@ -38,6 +38,7 @@ const (
 	attrToolType   = "gen_ai.tool.type"
 	attrToolArgs   = "gen_ai.tool.call.arguments"
 	attrToolResult = "gen_ai.tool.call.result"
+	attrToolCallID = "gen_ai.tool.call.id"
 	attrInputMsgs  = "gen_ai.input.messages"
 	attrOutputMsgs = "gen_ai.output.messages"
 	attrReqModel   = "gen_ai.request.model"

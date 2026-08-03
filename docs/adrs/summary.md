@@ -56,6 +56,10 @@ Decisions that later ADRs may not quietly undo:
 5. **Contracts are compiled, not interpreted.** Clause names resolve against a closed registry; an unknown name is a compile error, never a prompt. ([003](003-contract-lowering.md) §1.)
 6. **The tool must not leak what it was hired to detect.** Evidence is masked by default and content-bearing telemetry is confined to a short-retention, access-controlled sink. ([002](002-episode-schema.md) §7, [007](007-agentcore-trace-acquisition.md) §3.)
 
+## Amendments
+
+- **[007](007-agentcore-trace-acquisition.md) §3, §4, §5 — message content arrives out of band.** The ADR assumed one query: spans carry content as attributes once capture is enabled. They do not. Current ADOT/Strands releases emit message content as OTel *log records* in the agent's own log group, correlated by `traceId`/`spanId`, so a span-only fetch reports `has_message_content = false` on an agent capturing content correctly. Path A now runs a second bounded query and joins on span id, in the adapter, before the Episode is built — which is why invariants 4 and 6 hold unchanged and no evaluator learned about it. Also corrected there: a per-agent `spans` stream can exist while empty, so it is not proof of the span destination; `BatchGetTraces` sees only a sampled percentage of traces and is not a substitute for the span log group; and a wide-window `FilterLogEvents` returns an empty first page with a `nextToken`, which reads as "no data" to any caller that does not paginate.
+
 ## Open items
 
 - ~~**Go module path**~~: resolved to `github.com/AdrienFromToulouse/agentixdisciplina`, matching the repository's canonical lowercase name. A vanity path (`axda.dev/axda`) is still an option before the first tag. ([001](001-agent-admission-control.md))
