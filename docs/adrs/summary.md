@@ -14,6 +14,7 @@ The organising principle (**Agent Admission Control**) is that the evaluator is 
 - **Verdict**: the result of one evaluator, one of `pass`, `fail`, `skipped`, or `errored`, classed `deterministic` (blocking) or `probabilistic` (advisory by default).
 - **Coverage**: what a given trace can and cannot support. A clause whose requirements exceed coverage is `skipped`, never `passed`.
 - **Evidence**: the span a violation points at. A finding without it is not shippable output.
+- **Principal**: the human subject on whose behalf an episode ran. Carried in Episode Meta, mapped from the `enduser.id` semconv; absent when the trace carries no identity.
 
 ## Foundations
 
@@ -36,6 +37,7 @@ The organising principle (**Agent Admission Control**) is that the evaluator is 
 | ADR | Decision | Status |
 |-----|----------|--------|
 | [005](005-inline-admission-gate.md) | Inline Admission Gate | Proposed |
+| [009](009-rebac-authorization-clauses.md) | ReBAC Authorization Clauses Backed by SpiceDB | Proposed |
 
 ## Runtime integration
 
@@ -47,9 +49,9 @@ The organising principle (**Agent Admission Control**) is that the evaluator is 
 
 Decisions that later ADRs may not quietly undo:
 
-1. **The agent stays ignorant.** No SDK, no callback, no middleware, no import. The only coupling is the trace the agent already emits. ([001](001-agent-admission-control.md) §1, upheld under inline enforcement in [005](005-inline-admission-gate.md) §1 and against a real runtime in [007](007-agentcore-trace-acquisition.md) §1.)
-2. **`skipped` is never `passed`, and neither is `errored`.** A check that could not run, or that broke, must never read as a check that succeeded. ([003](003-contract-lowering.md) §5, [004](004-wasm-plugin-abi.md) §7.)
-3. **Determinism is a property of the whole input closure.** A verdict is blocking only if every input it read was deterministic, which is why capability-holding plugins are forced advisory. An LLM-extracted claim counts as deterministic only where a verbatim gate proved its evidence exists, which makes a failure blocking and a pass advisory. ([002](002-episode-schema.md) §4, [004](004-wasm-plugin-abi.md) §5, [008](008-verbatim-gated-extraction.md) §2.)
+1. **The agent stays ignorant.** No SDK, no callback, no middleware, no import. The only coupling is the trace the agent already emits. ([001](001-agent-admission-control.md) §1, upheld under inline enforcement in [005](005-inline-admission-gate.md) §1, against a real runtime in [007](007-agentcore-trace-acquisition.md) §1, and under relationship-based authorization in [009](009-rebac-authorization-clauses.md) §5.)
+2. **`skipped` is never `passed`, and neither is `errored`.** A check that could not run, or that broke, must never read as a check that succeeded. ([003](003-contract-lowering.md) §5, [004](004-wasm-plugin-abi.md) §7, [009](009-rebac-authorization-clauses.md) §7.)
+3. **Determinism is a property of the whole input closure.** A verdict is blocking only if every input it read was deterministic, which is why capability-holding plugins are forced advisory. An LLM-extracted claim counts as deterministic only where a verbatim gate proved its evidence exists, which makes a failure blocking and a pass advisory. A live authorization check is deterministic only at the moment it runs, which is why the gate records its decisions and the post-hoc clause reads the record. ([002](002-episode-schema.md) §4, [004](004-wasm-plugin-abi.md) §5, [008](008-verbatim-gated-extraction.md) §2, [009](009-rebac-authorization-clauses.md) §2.)
 4. **No finding without a span.** Every violation resolves to a `trace_id`/`span_id`, and a plugin that fabricates one is `errored`. ([001](001-agent-admission-control.md) §6, [004](004-wasm-plugin-abi.md) §7.)
 5. **Contracts are compiled, not interpreted.** Clause names resolve against a closed registry; an unknown name is a compile error, never a prompt. ([003](003-contract-lowering.md) §1.)
 6. **The tool must not leak what it was hired to detect.** Evidence is masked by default and content-bearing telemetry is confined to a short-retention, access-controlled sink. ([002](002-episode-schema.md) §7, [007](007-agentcore-trace-acquisition.md) §3.)

@@ -70,6 +70,8 @@ Default budget is **50ms** per tool call, wall-clock, from proxy ingress to deci
 
 Exceeding the budget is an error condition and resolves through §4, not by waiting.
 
+> **Narrowed (2026-08-03).** [ADR-009 §5](009-rebac-authorization-clauses.md) permits the gate one class of network call: the configured authorization checker, under a 10ms sub-budget. A Zanzibar-model check is neither slow nor probabilistic at check time, so neither disqualifying property of the judge applies.
+
 ### 4. Failure semantics are per-clause and default by severity
 
 The admission-webhook footgun is a single global fail-closed switch. `axda` makes it a per-clause property with a severity-derived default:
