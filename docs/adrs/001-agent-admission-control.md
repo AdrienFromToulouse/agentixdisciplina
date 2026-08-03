@@ -71,7 +71,7 @@ The concept is **Agent Admission Control**: policy evaluation as an external con
 
 There is no SDK to install, no callback to register, no middleware to mount, no import statement anywhere in the agent. The sole coupling between `axda` and the agent is the trace the agent already emits for observability reasons it had anyway.
 
-This is the load-bearing decision. Everything below is a consequence of it, and each of these properties is unavailable to any in-process design:
+Everything below is a consequence of this one decision, and each of these properties is unavailable to any in-process design:
 
 | Property | Why it follows |
 |---|---|

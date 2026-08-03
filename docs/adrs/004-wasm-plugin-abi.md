@@ -244,7 +244,7 @@ The evidence-validation row matters more than it looks: without it a plugin coul
 
 ## References
 
-- [ADR-001](001-agent-admission-control.md): chose WASM, and why the sandbox is load-bearing
+- [ADR-001](001-agent-admission-control.md): chose WASM, and why the sandbox is non-negotiable
 - [ADR-002](002-episode-schema.md): Episode is the wire type; provenance determines verdict class
 - [ADR-003](003-contract-lowering.md): plugin clause kinds register into the namespaced registry
 - [ADR-006](006-oci-distribution.md): plugin layers and signature verification

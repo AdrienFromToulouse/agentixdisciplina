@@ -269,6 +269,10 @@ Specified in the ADRs, absent from the binary:
 
 Embedding OPA and CUE costs real weight: the binary is ~47 MB and evaluation takes ~40 ms per run, most of it one-time Rego compilation.
 
+## Documentation
+
+The [user guide](docs/guide.md) covers the full surface: the CLI, the contract format and clause reference, value bindings, trace input, coverage semantics, judges, and the report schema.
+
 ## Design
 
 The architecture is settled in [docs/adrs](docs/adrs/summary.md): read [the index](docs/adrs/summary.md) first; it lists six invariants later work may not quietly undo.

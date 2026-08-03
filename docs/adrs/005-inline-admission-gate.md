@@ -25,7 +25,7 @@ Three problems follow:
 
 The gate runs as a process between the agent and its tools: an MCP proxy for MCP-based agents, an HTTP forward proxy for direct tool APIs. The agent's tool endpoint URL changes. Nothing else about the agent changes.
 
-This preserves [ADR-001](001-agent-admission-control.md)'s load-bearing property under inline enforcement. A gate delivered as a framework callback would put the checker back inside the checked, and every consequence [ADR-001](001-agent-admission-control.md) enumerated would return: skippable by configuration, versioned with the agent, unavailable for agents you did not write.
+This preserves [ADR-001](001-agent-admission-control.md)'s central property under inline enforcement. A gate delivered as a framework callback would put the checker back inside the checked, and every consequence [ADR-001](001-agent-admission-control.md) enumerated would return: skippable by configuration, versioned with the agent, unavailable for agents you did not write.
 
 A proxy keeps the agent ignorant. It also keeps the enforcement point at the only place where blocking is actually meaningful: the network hop where the side effect would occur. The agent never learns whether it was evaluated; it learns that a tool call returned an error.
 
