@@ -167,7 +167,7 @@ Or in one step:
 | **judge** clauses | `quality.judge` · `quality.helpful` · `quality.on_topic` · `quality.tone` · `grounding.judge`: advisory, cached |
 | builtin clauses | `content.no_pii` (Luhn-checked) · `content.deny_patterns` · `grounding.no_unsourced_claims` |
 | metric clauses | `budget.max_{duration_ms,steps,tokens,tool_errors}` |
-| Claim extraction | structural and deterministic: a sentence asserting a concrete value, grounded against tool results that completed *before* the turn |
+| Claim extraction | `structural` (deterministic) or `llm` behind a **verbatim gate**: the model must quote character-for-character or the row is discarded |
 | Value bindings | `from: tool_call \| tool_result \| metric \| literal`, JSONPath-lite, `cardinality: any \| first \| last \| exactly_one`, `default` |
 | Custom clauses | namespaced Rego declared in the contract, compiled and checked at load |
 | Coverage | `SKIP` with remediation hints; `--fail-on-skipped` to gate on instrumentation |
@@ -192,6 +192,25 @@ spec:
 ```
 
 A policy that does not compile is a **load-time** error, not a mid-run surprise. Custom findings carry span evidence like any built-in.
+
+### Fact extraction and the verbatim gate
+
+`structural` extraction is deterministic but only finds claims that assert a concrete value, so it misses anything stated in prose. `--extractor llm` closes that gap without handing fabrication to a model:
+
+```bash
+./axda evaluate -c agent.yaml -t trace.json --extractor llm
+```
+
+The model is shown the episode as addressable `<source>` blocks and must return, per fact, the source id and a snippet **copied character-for-character**. The code then locates that snippet: exact substring first, then allowing flexible whitespace *between* words for hard-wrapped lines, each word spelled exactly as the source spells it. A row whose snippet cannot be located is **discarded, never repaired**, and the stored citation is the source's own bytes rather than the model's retyping.
+
+That buys precision, not recall, so the uncertainty is one-sided and the verdict class follows it:
+
+| Outcome | Rests on | Class |
+|---|---|---|
+| a violation is found | a quote verified in code | **deterministic**, blocks |
+| no violation is found | the extractor having looked everywhere | **probabilistic**, advisory |
+
+A rejected row means the *extractor* quoted something absent from the trace. That is never charged to the agent: it lands in `coverage.degraded`. If the extractor cannot run, claim-reading clauses `SKIP` rather than silently falling back to `structural`.
 
 ### LLM judges
 
@@ -220,7 +239,8 @@ Default model is `claude-opus-5` at `effort: low`, since scoring a transcript ag
 
 Specified in the ADRs, absent from the binary:
 
-- **LLM claim extraction.** Only the `structural` extractor exists, so `cite_sources` under-detects on unstructured prose: it finds claims that assert a concrete value (a number, amount, date, or identifier) and nothing else. That also gates `from: claim_value` value bindings and the provenance downgrade that would make an invariant over an LLM-extracted value advisory ([ADR-002 §4](docs/adrs/002-episode-schema.md)).
+- **Extractor recall is unmeasured.** Nothing reports how many claims the LLM extractor missed; the advisory class on a pass is an admission of that, not a fix ([ADR-008](docs/adrs/008-verbatim-gated-extraction.md)).
+- **`from: claim_value` value bindings**, which would let an invariant read an extracted fact ([ADR-003 §4](docs/adrs/003-contract-lowering.md)).
 - **Policy bundles**: v0 takes `--contract FILE`, and custom clauses live in the contract rather than in bundle metadata. Git and OCI resolution, lockfiles, and signing are [ADR-001 §7](docs/adrs/001-agent-admission-control.md) and [ADR-006](docs/adrs/006-oci-distribution.md).
 - **WASM plugins** ([ADR-004](docs/adrs/004-wasm-plugin-abi.md)) and the **inline admission gate** ([ADR-005](docs/adrs/005-inline-admission-gate.md)).
 - `axda test`, `axda lint`, SARIF and JUnit reporters.

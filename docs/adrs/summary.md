@@ -28,6 +28,7 @@ The organising principle (**Agent Admission Control**) is that the evaluator is 
 | ADR | Decision | Status |
 |-----|----------|--------|
 | [004](004-wasm-plugin-abi.md) | WASM Plugin ABI `axda/plugin/v1` | Proposed |
+| [008](008-verbatim-gated-extraction.md) | Verbatim-Gated Fact Extraction | Proposed |
 | [006](006-oci-distribution.md) | OCI Bundle Distribution and Signing | Proposed |
 
 ## Enforcement surfaces
@@ -48,7 +49,7 @@ Decisions that later ADRs may not quietly undo:
 
 1. **The agent stays ignorant.** No SDK, no callback, no middleware, no import. The only coupling is the trace the agent already emits. ([001](001-agent-admission-control.md) §1, upheld under inline enforcement in [005](005-inline-admission-gate.md) §1 and against a real runtime in [007](007-agentcore-trace-acquisition.md) §1.)
 2. **`skipped` is never `passed`, and neither is `errored`.** A check that could not run, or that broke, must never read as a check that succeeded. ([003](003-contract-lowering.md) §5, [004](004-wasm-plugin-abi.md) §7.)
-3. **Determinism is a property of the whole input closure.** A verdict is blocking only if every input it read was deterministic, which is why LLM-extracted claims and capability-holding plugins are forced advisory. ([002](002-episode-schema.md) §4, [004](004-wasm-plugin-abi.md) §5.)
+3. **Determinism is a property of the whole input closure.** A verdict is blocking only if every input it read was deterministic, which is why capability-holding plugins are forced advisory. An LLM-extracted claim counts as deterministic only where a verbatim gate proved its evidence exists, which makes a failure blocking and a pass advisory. ([002](002-episode-schema.md) §4, [004](004-wasm-plugin-abi.md) §5, [008](008-verbatim-gated-extraction.md) §2.)
 4. **No finding without a span.** Every violation resolves to a `trace_id`/`span_id`, and a plugin that fabricates one is `errored`. ([001](001-agent-admission-control.md) §6, [004](004-wasm-plugin-abi.md) §7.)
 5. **Contracts are compiled, not interpreted.** Clause names resolve against a closed registry; an unknown name is a compile error, never a prompt. ([003](003-contract-lowering.md) §1.)
 6. **The tool must not leak what it was hired to detect.** Evidence is masked by default and content-bearing telemetry is confined to a short-retention, access-controlled sink. ([002](002-episode-schema.md) §7, [007](007-agentcore-trace-acquisition.md) §3.)

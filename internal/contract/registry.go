@@ -43,6 +43,8 @@ type EvalContext struct {
 	Rego        *regoeng.Engine
 	CUE         *cueeng.Evaluator
 	Judge       *judge.Judge
+	// ClaimsExtractor names the extractor that produced Episode.Claims.
+	ClaimsExtractor string
 	// Provenance is a per-clause scratch map the runner copies onto the
 	// verdict. Probabilistic clauses write their model id, prompt hash,
 	// and effort here.
@@ -66,7 +68,12 @@ type Kind struct {
 	Positions       []string // spec | must | must_not
 	PrefixDecidable bool
 	RequiredParams  []string
-	Eval            func(EvalContext) ([]verdict.Finding, error)
+	// ReadsClaims marks a kind whose verdict inherits the claim extractor's
+	// provenance. With the llm extractor that makes a failure deterministic
+	// (the quote was verified) and a pass probabilistic (the extractor may
+	// have missed something) — ADR-008 §2.
+	ReadsClaims bool
+	Eval        func(EvalContext) ([]verdict.Finding, error)
 }
 
 func (k *Kind) allows(position string) bool {

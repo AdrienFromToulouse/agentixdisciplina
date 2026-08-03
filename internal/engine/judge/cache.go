@@ -96,3 +96,17 @@ func (j *Judge) Flush() error {
 	}
 	return j.cache.Flush()
 }
+
+// cacheRaw and putRaw let the extractor share the judge's cache. Extractor
+// output is a JSON array rather than a Verdict, so it rides in Reasoning.
+func (j *Judge) cacheRaw(key string) ([]byte, bool) {
+	v, ok := j.cache.Get(key)
+	if !ok {
+		return nil, false
+	}
+	return []byte(v.Reasoning), true
+}
+
+func (j *Judge) putRaw(key string, raw []byte) {
+	j.cache.Put(key, &Verdict{Reasoning: string(raw), ModelID: j.cfg.Model, Effort: j.cfg.Effort})
+}

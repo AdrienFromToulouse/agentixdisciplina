@@ -25,6 +25,7 @@ func init() {
 		// Cannot be satisfied on a prefix: the agent may cite later
 		// (ADR-005 §2).
 		PrefixDecidable: false,
+		ReadsClaims:     true,
 		Eval:            evalCiteSources,
 	})
 
@@ -35,6 +36,7 @@ func init() {
 		Reads:    "claims[], tool_calls[].result", DefaultSeverity: "critical",
 		Positions:       []string{"must", "must_not"},
 		PrefixDecidable: true,
+		ReadsClaims:     true,
 		Eval:            evalNoUnsourcedClaims,
 	})
 

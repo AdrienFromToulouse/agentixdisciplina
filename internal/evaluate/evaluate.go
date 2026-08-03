@@ -22,6 +22,10 @@ type Options struct {
 	// Judge is nil when judges are disabled; clauses that need one then
 	// report SKIPPED rather than failing.
 	Judge *judge.Judge
+	// Extractor produces Episode claims. Nil selects the deterministic
+	// structural extractor. An extractor that errors makes claim-reading
+	// clauses SKIP; it never silently falls back (ADR-008 §4).
+	Extractor extract.Extractor
 }
 
 func Run(plan *contract.Plan, ep *episode.Episode, opts Options) *report.Report {
@@ -46,7 +50,6 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 			Spans:     len(ep.Spans),
 			ToolCalls: len(ep.ToolCalls),
 			Turns:     len(ep.Turns),
-			Degraded:  ep.Coverage.Degraded,
 		},
 	}
 	if ep.Meta.Adapter == adapter.AdapterXRay {
@@ -54,11 +57,35 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 	}
 
 	// Claims are inferred, not read, so they are extracted here rather than
-	// by the adapter, and the structural extractor is deterministic, which
-	// is what lets grounding clauses block (ADR-002 §4).
+	// by the adapter. The structural extractor is deterministic; the llm
+	// extractor is gated on verbatim evidence and changes verdict class
+	// (ADR-002 §4, ADR-008 §2).
+	extractorName := extract.ExtractorStructural
+	var extractErr error
 	if len(ep.Claims) == 0 {
-		ep.Claims = extract.Structural(ep)
+		if opts.Extractor != nil {
+			extractorName = opts.Extractor.Name()
+			facts, rejected, err := opts.Extractor.Facts(ctx, ep)
+			if err != nil {
+				extractErr = err
+			} else {
+				ep.Claims = extract.ToClaims(facts)
+				// A rejection says the extractor quoted something absent
+				// from the trace. That is a signal about the extractor,
+				// never a violation by the agent (ADR-008 §3).
+				for _, r := range rejected {
+					ep.Coverage.Degraded = append(ep.Coverage.Degraded,
+						"extractor row rejected: "+r.Reason)
+				}
+			}
+		} else {
+			ep.Claims = extract.Structural(ep)
+		}
 	}
+
+	// Snapshot coverage notes *after* extraction, so extractor rejections
+	// reach the report rather than being captured before they exist.
+	r.Episode.Degraded = ep.Coverage.Degraded
 
 	// The Episode is marshalled once and shared with every Rego clause;
 	// values are bound once and shared with every invariant.
@@ -77,6 +104,18 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 			Blocking: e.Clause.Blocking,
 		}
 
+		// An extractor that could not run makes claim-reading clauses
+		// unevaluable. It never falls back to structural and reports as
+		// though the better extractor had run (ADR-008 §4).
+		if e.Kind.ReadsClaims && extractErr != nil {
+			v.Status = verdict.Skipped
+			v.MissingCoverage = []string{
+				extractorName + " extractor unavailable: " + extractErr.Error()}
+			r.Counts.Skipped++
+			r.Verdicts = append(r.Verdicts, v)
+			continue
+		}
+
 		// requires ⊄ coverage → SKIPPED, never PASS (ADR-003 §5).
 		if missing := ep.Coverage.Missing(e.Kind.Requires); len(missing) > 0 {
 			v.Status = verdict.Skipped
@@ -87,7 +126,7 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 		}
 
 		provenance := map[string]string{}
-		findings, err := runClause(ctx, e, ep, epJSON, bindings, plan, opts, provenance, jsonErr)
+		findings, err := runClause(ctx, e, ep, epJSON, bindings, plan, opts, extractorName, provenance, jsonErr)
 		if len(provenance) > 0 {
 			v.Provenance = provenance
 		}
@@ -123,6 +162,24 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 			r.Counts.Pass++
 			scoreEarned += w
 		}
+
+		// The verbatim gate makes evidence deterministic but says nothing
+		// about recall, so the uncertainty is one-sided: a failure rests on
+		// a quote verified in code, a pass rests on the extractor having
+		// looked everywhere (ADR-008 §2).
+		if e.Kind.ReadsClaims && extractorName == extract.ExtractorLLM {
+			if v.Status == verdict.Pass {
+				v.Class = verdict.Probabilistic
+				v.Blocking = false
+				v.Message += " (advisory: llm extraction may have missed claims)"
+			} else {
+				v.Class = verdict.Deterministic
+			}
+			if v.Provenance == nil {
+				v.Provenance = map[string]string{}
+			}
+			v.Provenance["extractor"] = extractorName
+		}
 		r.Verdicts = append(r.Verdicts, v)
 	}
 
@@ -156,6 +213,7 @@ func runClause(
 	bindings map[string]contract.Binding,
 	plan *contract.Plan,
 	opts Options,
+	extractorName string,
 	provenance map[string]string,
 	jsonErr error,
 ) (out []verdict.Finding, err error) {
@@ -169,16 +227,17 @@ func runClause(
 		return nil, fmt.Errorf("encode episode for policy evaluation: %w", jsonErr)
 	}
 	return e.Kind.Eval(contract.EvalContext{
-		Ctx:         ctx,
-		Episode:     ep,
-		EpisodeJSON: epJSON,
-		Clause:      e.Clause,
-		Bindings:    bindings,
-		Evidence:    opts.Evidence,
-		Rego:        plan.Rego,
-		CUE:         plan.CUE,
-		Judge:       opts.Judge,
-		Provenance:  provenance,
+		Ctx:             ctx,
+		Episode:         ep,
+		EpisodeJSON:     epJSON,
+		Clause:          e.Clause,
+		Bindings:        bindings,
+		Evidence:        opts.Evidence,
+		Rego:            plan.Rego,
+		CUE:             plan.CUE,
+		Judge:           opts.Judge,
+		ClaimsExtractor: extractorName,
+		Provenance:      provenance,
 	})
 }
 
