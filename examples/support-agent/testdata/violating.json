@@ -179,13 +179,13 @@
                 {
                   "key": "gen_ai.tool.call.arguments",
                   "value": {
-                    "stringValue": "{\"customer_id\": \"C-4471\", \"order_id\": \"88213\", \"amount\": 240}"
+                    "stringValue": "{\"customer_id\": \"C-4471\", \"order_id\": \"88213\", \"amount\": 900}"
                   }
                 },
                 {
                   "key": "gen_ai.tool.call.result",
                   "value": {
-                    "stringValue": "{\"status\": \"issued\", \"refund_id\": \"RF-9913\", \"amount\": 240}"
+                    "stringValue": "{\"status\": \"issued\", \"refund_id\": \"RF-9913\", \"amount\": 900}"
                   }
                 }
               ],

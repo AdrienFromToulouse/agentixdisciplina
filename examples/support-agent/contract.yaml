@@ -4,6 +4,34 @@ metadata:
   name: support-agent
 
 spec:
+  # Every invariant operand says where it comes from. An undeclared identifier
+  # is a compile error, and `cardinality` is required rather than defaulted —
+  # a policy that silently checks only the first of five refunds is the exact
+  # bug this field prevents (ADR-003 §4).
+  values:
+    refund.amount:
+      from: tool_call
+      tool: billing.refund
+      arg: amount
+      cardinality: any          # the constraint must hold for EVERY refund
+
+    approved_limit:
+      from: tool_result
+      tool: crm.lookup
+      path: $.customer.refund_limit
+      cardinality: last
+
+    customer.tier:
+      from: tool_result
+      tool: crm.lookup
+      path: $.customer.tier
+      cardinality: last
+      default: standard         # absent tier is not a skip, it is "standard"
+
+  invariants:
+    - "refund.amount <= approved_limit"
+    - 'customer.tier == "enterprise" || refund.amount <= 500'
+
   # Delegation to a sub-agent is also an action, so nested invoke_agent spans
   # are governed by this list too (ADR-002 §6).
   allowed_tools:
@@ -28,6 +56,16 @@ spec:
 
     - kind: budget.max_tool_errors
       value: 0
+
+    # CUE schema unification over captured tool arguments.
+    - kind: tool.args_match
+      tool: billing.refund
+      schema: |
+        {
+          customer_id: =~"^C-[0-9]+$"
+          order_id:    string
+          amount:      number & >0
+        }
 
     # Requires has_token_usage; reports SKIPPED, never PASS, when the trace
     # carries no gen_ai.usage.* attributes.

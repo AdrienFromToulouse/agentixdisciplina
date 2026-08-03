@@ -1,12 +1,16 @@
 package contract
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/detect"
+	cueeng "github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/cue"
+	regoeng "github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/rego"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/episode"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/verdict"
 )
@@ -18,11 +22,25 @@ const (
 	ClassProbabilistic = verdict.Probabilistic
 )
 
-// EvalContext is what a clause evaluator sees.
+// SkipError tells the runner a clause could not be evaluated. It exists so a
+// clause can decide *at runtime* that its inputs are absent — an invariant
+// whose operand never appeared in the trace is skipped, never vacuously
+// passed (ADR-003 §4).
+type SkipError struct{ Reasons []string }
+
+func (e *SkipError) Error() string { return strings.Join(e.Reasons, "; ") }
+
+// EvalContext is what a clause evaluator sees. The Episode is marshalled and
+// values are bound once per run, then shared across clauses.
 type EvalContext struct {
-	Episode  *episode.Episode
-	Clause   Clause
-	Evidence verdict.EvidenceMode
+	Ctx         context.Context
+	Episode     *episode.Episode
+	EpisodeJSON map[string]any
+	Clause      Clause
+	Bindings    map[string]Binding
+	Evidence    verdict.EvidenceMode
+	Rego        *regoeng.Engine
+	CUE         *cueeng.Evaluator
 }
 
 // Kind is a registered clause definition.
@@ -42,7 +60,7 @@ type Kind struct {
 	Positions       []string // spec | must | must_not
 	PrefixDecidable bool
 	RequiredParams  []string
-	Eval            func(EvalContext) []verdict.Finding
+	Eval            func(EvalContext) ([]verdict.Finding, error)
 }
 
 func (k *Kind) allows(position string) bool {
@@ -97,109 +115,100 @@ func KnownNames() []string {
 	return out
 }
 
+// regoClause adapts an embedded Rego rule to the clause interface.
+func regoClause(query string) func(EvalContext) ([]verdict.Finding, error) {
+	return func(ec EvalContext) ([]verdict.Finding, error) {
+		found, err := ec.Rego.Eval(ec.Ctx, query, regoeng.Input{
+			Episode: ec.EpisodeJSON,
+			Params:  ec.Clause.Params,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]verdict.Finding, 0, len(found))
+		for _, f := range found {
+			out = append(out, verdict.Finding{
+				Message: f.Message,
+				Evidence: verdict.Evidence{
+					TraceID: f.TraceID, SpanID: f.SpanID, Path: f.Path,
+				},
+			})
+		}
+		return out, nil
+	}
+}
+
 func init() {
+	// ------------------------------------------------------------- Rego
+	// What the agent *did*: permissions and sequencing over the tool log.
+
 	register(&Kind{
 		Name: "tool.allowlist", Aliases: []string{"allowed_tools"},
-		Engine: "builtin:axda.tools", Class: ClassDeterministic,
+		Engine: "rego:axda.tool.allowlist_violation", Class: ClassDeterministic,
 		Reads: "tool_calls[].name", DefaultSeverity: "critical",
 		Positions: []string{"spec", "must"}, PrefixDecidable: true,
 		RequiredParams: []string{"tools"},
-		Eval: func(ec EvalContext) []verdict.Finding {
-			allowed := strSlice(ec.Clause.Params["tools"])
-			var out []verdict.Finding
-			for _, tc := range ec.Episode.ToolCalls {
-				if anyMatch(allowed, tc.Name) {
-					continue
-				}
-				noun := "tool"
-				if tc.Kind == "agent" {
-					noun = "sub-agent delegation"
-				}
-				out = append(out, verdict.Finding{
-					Message:  fmt.Sprintf("%s %q is not in the allowed set", noun, tc.Name),
-					Evidence: ev(tc.Span, ""),
-				})
-			}
-			return out
-		},
+		Eval:           regoClause("data.axda.tool.allowlist_violation"),
 	})
 
 	register(&Kind{
 		Name: "tool.denylist", Aliases: []string{"denied_tools"},
-		Engine: "builtin:axda.tools", Class: ClassDeterministic,
+		Engine: "rego:axda.tool.denylist_violation", Class: ClassDeterministic,
 		Reads: "tool_calls[].name", DefaultSeverity: "critical",
 		Positions: []string{"spec", "must", "must_not"}, PrefixDecidable: true,
 		RequiredParams: []string{"tools"},
-		Eval: func(ec EvalContext) []verdict.Finding {
-			denied := strSlice(ec.Clause.Params["tools"])
-			var out []verdict.Finding
-			for _, tc := range ec.Episode.ToolCalls {
-				if anyMatch(denied, tc.Name) {
-					out = append(out, verdict.Finding{
-						Message:  fmt.Sprintf("tool %q is denied", tc.Name),
-						Evidence: ev(tc.Span, ""),
-					})
-				}
-			}
-			return out
-		},
+		Eval:           regoClause("data.axda.tool.denylist_violation"),
 	})
 
 	register(&Kind{
-		Name: "tool.call_limit", Engine: "builtin:axda.tools", Class: ClassDeterministic,
+		Name: "tool.call_limit", Engine: "rego:axda.tool.call_limit_violation",
+		Class: ClassDeterministic,
 		Reads: "tool_calls[]", DefaultSeverity: "major",
 		Positions: []string{"must"}, PrefixDecidable: true,
 		RequiredParams: []string{"max"},
-		Eval: func(ec EvalContext) []verdict.Finding {
-			max := intParam(ec.Clause.Params["max"], -1)
-			pattern, _ := ec.Clause.Params["tool"].(string)
-			var count int
-			var last episode.SpanRef
-			for _, tc := range ec.Episode.ToolCalls {
-				if pattern == "" || matchName(pattern, tc.Name) {
-					count++
-					last = tc.Span
-				}
-			}
-			if max >= 0 && count > max {
-				label := "tool calls"
-				if pattern != "" {
-					label = fmt.Sprintf("calls to %q", pattern)
-				}
-				return []verdict.Finding{{
-					Message:  fmt.Sprintf("%d %s exceeds limit of %d", count, label, max),
-					Evidence: ev(last, ""),
-				}}
-			}
-			return nil
-		},
+		Eval:           regoClause("data.axda.tool.call_limit_violation"),
 	})
 
 	register(&Kind{
 		Name: "order.requires_precondition", Aliases: []string{"verify_identity_before_action"},
-		Engine: "builtin:axda.order", Class: ClassDeterministic,
+		Engine: "rego:axda.order.requires_precondition_violation", Class: ClassDeterministic,
 		Reads: "tool_calls[] (ordered)", DefaultSeverity: "critical",
 		Positions: []string{"must"}, PrefixDecidable: true,
 		RequiredParams: []string{"action", "precondition"},
-		Eval: func(ec EvalContext) []verdict.Finding {
-			action, _ := ec.Clause.Params["action"].(string)
-			pre, _ := ec.Clause.Params["precondition"].(string)
-			var out []verdict.Finding
-			for _, tc := range ec.Episode.ToolCalls {
-				if !matchName(action, tc.Name) {
-					continue
-				}
-				if hasPrecondition(ec.Episode.ToolCalls, pre, tc) {
-					continue
-				}
-				out = append(out, verdict.Finding{
-					Message: fmt.Sprintf("%q ran with no completed %q before it", tc.Name, pre),
-					Evidence: ev(tc.Span, ""),
-				})
-			}
-			return out
-		},
+		Eval:           regoClause("data.axda.order.requires_precondition_violation"),
 	})
+
+	register(&Kind{
+		Name: "order.before", Engine: "rego:axda.order.before_violation",
+		Class: ClassDeterministic,
+		Reads: "tool_calls[] (ordered)", DefaultSeverity: "major",
+		Positions: []string{"must"}, PrefixDecidable: true,
+		RequiredParams: []string{"first", "then"},
+		Eval:           regoClause("data.axda.order.before_violation"),
+	})
+
+	// -------------------------------------------------------------- CUE
+	// What the agent *believed*: value consistency under unification.
+
+	register(&Kind{
+		Name: "invariant", Engine: "cue", Class: ClassDeterministic,
+		Reads: "declared values (spec.values)", DefaultSeverity: "critical",
+		Positions: []string{"spec"}, PrefixDecidable: true,
+		RequiredParams: []string{"expr"},
+		Eval:           evalInvariant,
+	})
+
+	register(&Kind{
+		Name: "tool.args_match", Engine: "cue", Class: ClassDeterministic,
+		Requires: []string{episode.HasToolArgs},
+		Reads:    "tool_calls[].arguments", DefaultSeverity: "major",
+		Positions: []string{"must"}, PrefixDecidable: true,
+		RequiredParams: []string{"tool", "schema"},
+		Eval:           evalArgsMatch,
+	})
+
+	// ---------------------------------------------------------- builtin
+	// Detection that is not expressible as policy: regex and Luhn.
 
 	register(&Kind{
 		Name: "content.no_pii", Aliases: []string{"expose_pii"},
@@ -207,35 +216,7 @@ func init() {
 		Requires: []string{episode.HasMessageContent},
 		Reads:    "turns[].text, tool_calls[].arguments", DefaultSeverity: "critical",
 		Positions: []string{"must", "must_not"}, PrefixDecidable: true,
-		Eval: func(ec EvalContext) []verdict.Finding {
-			types := strSlice(ec.Clause.Params["types"])
-			// Sending a card number to billing.charge is the job; policies
-			// express where PII may travel, not merely whether it appears.
-			allowIn := strSlice(ec.Clause.Params["allow_in_tool_args"])
-			masked := ec.Evidence != verdict.EvidenceFull
-
-			var out []verdict.Finding
-			for _, t := range ec.Episode.Turns {
-				for _, m := range detect.PII(t.Text, types) {
-					out = append(out, verdict.Finding{
-						Message:  fmt.Sprintf("%s exposed in %s turn", m.Type, t.Role),
-						Evidence: ev(t.Span, excerpt(ec, t.Text, m, masked)),
-					})
-				}
-			}
-			for _, tc := range ec.Episode.ToolCalls {
-				if tc.Arguments == "" || anyMatch(allowIn, tc.Name) {
-					continue
-				}
-				for _, m := range detect.PII(tc.Arguments, types) {
-					out = append(out, verdict.Finding{
-						Message:  fmt.Sprintf("%s in arguments to %q", m.Type, tc.Name),
-						Evidence: ev(tc.Span, excerpt(ec, tc.Arguments, m, masked)),
-					})
-				}
-			}
-			return out
-		},
+		Eval: evalNoPII,
 	})
 
 	register(&Kind{
@@ -244,44 +225,18 @@ func init() {
 		Reads:    "turns[].text", DefaultSeverity: "major",
 		Positions: []string{"must", "must_not"}, PrefixDecidable: true,
 		RequiredParams: []string{"patterns"},
-		Eval: func(ec EvalContext) []verdict.Finding {
-			var out []verdict.Finding
-			for _, p := range strSlice(ec.Clause.Params["patterns"]) {
-				re, err := regexp.Compile(p)
-				if err != nil {
-					continue // rejected at validate time in a later revision
-				}
-				for _, t := range ec.Episode.Turns {
-					if loc := re.FindStringIndex(t.Text); loc != nil {
-						m := detect.Match{Type: "pattern", Start: loc[0], End: loc[1], Raw: t.Text[loc[0]:loc[1]]}
-						// Trailing context is dropped unless --evidence=full:
-						// the value a pattern like `password\s*[:=]` catches
-						// sits after the match, so printing it would leak the
-						// secret this clause exists to find.
-						ex := ""
-						if ec.Evidence == verdict.EvidenceFull {
-							ex = detect.Excerpt(t.Text, m, false)
-						} else if ec.Evidence == verdict.EvidenceMasked {
-							ex = detect.ExcerptLeading(t.Text, m)
-						}
-						out = append(out, verdict.Finding{
-							Message:  fmt.Sprintf("denied pattern %q matched in %s turn", p, t.Role),
-							Evidence: ev(t.Span, ex),
-						})
-					}
-				}
-			}
-			return out
-		},
+		Eval:           evalDenyPatterns,
 	})
+
+	// ----------------------------------------------------------- metric
 
 	budget := func(name, reads string, requires []string, get func(episode.Metrics) int64, unit string) *Kind {
 		return &Kind{
-			Name: name, Engine: "builtin:axda.metric", Class: ClassDeterministic,
+			Name: name, Engine: "metric", Class: ClassDeterministic,
 			Requires: requires, Reads: reads, DefaultSeverity: "major",
 			Positions: []string{"must"}, PrefixDecidable: true,
 			RequiredParams: []string{"value"},
-			Eval: func(ec EvalContext) []verdict.Finding {
+			Eval: func(ec EvalContext) ([]verdict.Finding, error) {
 				limit := int64(intParam(ec.Clause.Params["value"], -1))
 				actual := get(ec.Episode.Metrics)
 				if limit >= 0 && actual > limit {
@@ -290,9 +245,9 @@ func init() {
 						Evidence: verdict.Evidence{
 							TraceID: ec.Episode.Meta.TraceID, Path: "metrics",
 						},
-					}}
+					}}, nil
 				}
-				return nil
+				return nil, nil
 			},
 		}
 	}
@@ -306,19 +261,166 @@ func init() {
 		func(m episode.Metrics) int64 { return int64(m.ToolErrors) }, "tool errors"))
 }
 
-// hasPrecondition reports whether a completed, non-overlapping precondition
-// call precedes the action. Overlapping spans count as unordered (ADR-003 §2),
-// so no policy depends on the arbitrary span-id tie-break.
-func hasPrecondition(calls []episode.ToolCall, pattern string, action episode.ToolCall) bool {
-	for _, c := range calls {
-		if !matchName(pattern, c.Name) || c.Error != "" {
-			continue
-		}
-		if c.EndedAt > 0 && c.EndedAt <= action.StartedAt {
-			return true
+// evalInvariant checks a CUE constraint over declared values, once per
+// combination of `any`-cardinality bindings.
+func evalInvariant(ec EvalContext) ([]verdict.Finding, error) {
+	expr, _ := ec.Clause.Params["expr"].(string)
+	names := ReferencedNames(expr, sortedKeys(ec.Bindings))
+
+	// A missing operand makes the constraint unevaluable, not satisfied.
+	var reasons []string
+	for _, n := range names {
+		if b, ok := ec.Bindings[n]; ok && b.Missing {
+			reasons = append(reasons, b.Reason)
 		}
 	}
-	return false
+	if len(reasons) > 0 {
+		return nil, &SkipError{Reasons: reasons}
+	}
+
+	// A cardinality mismatch is a failure in its own right: the contract
+	// asserted a count and the trace disagreed.
+	var out []verdict.Finding
+	for _, n := range names {
+		b := ec.Bindings[n]
+		if b.CardinalityViolation != "" {
+			out = append(out, verdict.Finding{
+				Message: b.CardinalityViolation,
+				Evidence: verdict.Evidence{
+					TraceID: b.Span.TraceID, SpanID: b.Span.SpanID, Path: b.Span.Path,
+				},
+			})
+		}
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+
+	combos, err := Combinations(ec.Bindings, names)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range combos {
+		ok, err := ec.CUE.Constraint(expr, c.Vars)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			continue
+		}
+		out = append(out, verdict.Finding{
+			Message: fmt.Sprintf("invariant %q does not hold where %s", expr, formatVars(c.Vars, names)),
+			Evidence: verdict.Evidence{
+				TraceID: c.Span.TraceID, SpanID: c.Span.SpanID, Path: c.Span.Path,
+			},
+		})
+	}
+	return out, nil
+}
+
+func evalArgsMatch(ec EvalContext) ([]verdict.Finding, error) {
+	toolPattern, _ := ec.Clause.Params["tool"].(string)
+	schema, _ := ec.Clause.Params["schema"].(string)
+
+	var out []verdict.Finding
+	for _, tc := range ec.Episode.ToolCalls {
+		if !matchName(toolPattern, tc.Name) || !tc.ArgsCaptured {
+			continue
+		}
+		var args any
+		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+			continue
+		}
+		if err := ec.CUE.UnifySchema(schema, args); err != nil {
+			out = append(out, verdict.Finding{
+				Message: fmt.Sprintf("arguments to %q do not match the declared schema: %s",
+					tc.Name, firstLine(err.Error())),
+				Evidence: verdict.Evidence{
+					TraceID: tc.Span.TraceID, SpanID: tc.Span.SpanID, Path: tc.Span.Path,
+				},
+			})
+		}
+	}
+	return out, nil
+}
+
+func evalNoPII(ec EvalContext) ([]verdict.Finding, error) {
+	types := strSlice(ec.Clause.Params["types"])
+	// Sending a card number to billing.charge is the job; policies express
+	// where PII may travel, not merely whether it appears.
+	allowIn := strSlice(ec.Clause.Params["allow_in_tool_args"])
+	masked := ec.Evidence != verdict.EvidenceFull
+
+	var out []verdict.Finding
+	for _, t := range ec.Episode.Turns {
+		for _, m := range detect.PII(t.Text, types) {
+			out = append(out, verdict.Finding{
+				Message:  fmt.Sprintf("%s exposed in %s turn", m.Type, t.Role),
+				Evidence: ev(t.Span, excerpt(ec, t.Text, m, masked)),
+			})
+		}
+	}
+	for _, tc := range ec.Episode.ToolCalls {
+		if tc.Arguments == "" || anyMatch(allowIn, tc.Name) {
+			continue
+		}
+		for _, m := range detect.PII(tc.Arguments, types) {
+			out = append(out, verdict.Finding{
+				Message:  fmt.Sprintf("%s in arguments to %q", m.Type, tc.Name),
+				Evidence: ev(tc.Span, excerpt(ec, tc.Arguments, m, masked)),
+			})
+		}
+	}
+	return out, nil
+}
+
+func evalDenyPatterns(ec EvalContext) ([]verdict.Finding, error) {
+	var out []verdict.Finding
+	for _, p := range strSlice(ec.Clause.Params["patterns"]) {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %q: %w", p, err)
+		}
+		for _, t := range ec.Episode.Turns {
+			loc := re.FindStringIndex(t.Text)
+			if loc == nil {
+				continue
+			}
+			m := detect.Match{Type: "pattern", Start: loc[0], End: loc[1], Raw: t.Text[loc[0]:loc[1]]}
+			// Trailing context is dropped unless --evidence=full: the value
+			// a pattern like `password\s*[:=]` catches sits after the match,
+			// so printing it would leak the secret this clause exists to find.
+			ex := ""
+			switch ec.Evidence {
+			case verdict.EvidenceFull:
+				ex = detect.Excerpt(t.Text, m, false)
+			case verdict.EvidenceMasked:
+				ex = detect.ExcerptLeading(t.Text, m)
+			}
+			out = append(out, verdict.Finding{
+				Message:  fmt.Sprintf("denied pattern %q matched in %s turn", p, t.Role),
+				Evidence: ev(t.Span, ex),
+			})
+		}
+	}
+	return out, nil
+}
+
+func formatVars(vars map[string]any, names []string) string {
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		if v, ok := vars[n]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%v", n, v))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func excerpt(ec EvalContext, text string, m detect.Match, masked bool) string {
@@ -332,7 +434,8 @@ func ev(s episode.SpanRef, excerpt string) verdict.Evidence {
 	return verdict.Evidence{TraceID: s.TraceID, SpanID: s.SpanID, Path: s.Path, Excerpt: excerpt}
 }
 
-// matchName supports exact names and a trailing/leading `*` wildcard.
+// matchName supports exact names and a trailing/leading `*` wildcard. Kept in
+// sync with data.axda.match in policy/match.rego.
 func matchName(pattern, name string) bool {
 	switch {
 	case pattern == "" || pattern == "*":

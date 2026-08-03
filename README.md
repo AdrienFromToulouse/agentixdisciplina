@@ -30,6 +30,24 @@ The properties worth asserting are properties of the **episode**, not the final 
 spec:
   allowed_tools: [crm.lookup, crm.verify_identity, billing.refund, email.send]
 
+  # Every operand says where it comes from. `cardinality` is required, not
+  # defaulted: a policy that silently checks only the first of five refunds is
+  # the exact bug this field prevents.
+  values:
+    refund.amount:
+      from: tool_call
+      tool: billing.refund
+      arg: amount
+      cardinality: any                     # must hold for EVERY refund
+    approved_limit:
+      from: tool_result
+      tool: crm.lookup
+      path: $.customer.refund_limit
+      cardinality: last
+
+  invariants:
+    - "refund.amount <= approved_limit"
+
   must:
     - kind: order.requires_precondition
       action: billing.refund
@@ -41,7 +59,17 @@ spec:
       allow_in_tool_args: [email.send]     # sending an address to email.send is the job
 ```
 
-Clause names resolve against a closed registry. An unknown name is a **compile error, never a prompt** — a contract that reads like prose but is *understood* like prose would just be a prompt with YAML syntax.
+Clause names resolve against a closed registry. An unknown name is a **compile error, never a prompt** — a contract that reads like prose but is *understood* like prose would just be a prompt with YAML syntax. The same applies to invariants: an operand you did not declare fails at compile time, before any trace is read.
+
+Three engines, three questions ([ADR-003 §4](docs/adrs/003-contract-lowering.md)):
+
+| Engine | Filters | Question |
+|---|---|---|
+| **Rego** (embedded OPA) | what the agent **did** | Was this action allowed? |
+| **CUE** | what the agent **believed** | Is this value consistent? |
+| **metric** | what the agent **cost** | Was this within budget? |
+
+`axda explain` prints the full lowering, so the descent from contract to check is never a black box.
 
 ## Three rules it will not break
 
@@ -134,22 +162,48 @@ Or in one step:
 |---|---|
 | Adapters | `otlp/v1.41` (file or stdin), `cloudwatch-spans/v1` (`aws/spans`) |
 | Trace fetch | CloudWatch by session id or trace id, with settle-polling and `--raw` |
-| Clauses | `tool.allowlist` · `tool.denylist` · `tool.call_limit` · `order.requires_precondition` · `content.no_pii` · `content.deny_patterns` · `budget.max_{duration_ms,steps,tokens,tool_errors}` |
+| **Rego** clauses | `tool.allowlist` · `tool.denylist` · `tool.call_limit` · `order.requires_precondition` · `order.before` |
+| **CUE** clauses | `invariants` with declared value bindings · `tool.args_match` schema unification |
+| builtin clauses | `content.no_pii` (Luhn-checked) · `content.deny_patterns` |
+| metric clauses | `budget.max_{duration_ms,steps,tokens,tool_errors}` |
+| Value bindings | `from: tool_call \| tool_result \| metric \| literal`, JSONPath-lite, `cardinality: any \| first \| last \| exactly_one`, `default` |
+| Custom clauses | namespaced Rego declared in the contract, compiled and checked at load |
 | Coverage | `SKIP` with remediation hints; `--fail-on-skipped` to gate on instrumentation |
-| Evidence | `--evidence masked` (default) `full` `none`; Luhn-checked cards, last-4 preserved |
+| Evidence | `--evidence masked` (default) `full` `none`; last-4 preserved on cards |
 | Output | human, `--json` (`axda.dev/report/v1`) |
+
+### Custom clauses
+
+Bring your own Rego. It must be namespaced — the bare namespaces are reserved so a contract cannot shadow `tool.allowlist` and change what an existing clause means.
+
+```yaml
+clauses:
+  - name: acme.no_weekend_refunds
+    engine: rego
+    source: policy/weekend.rego
+    query: data.acme.weekend.violation
+    requires: [has_tool_args]
+spec:
+  must:
+    - kind: acme.no_weekend_refunds
+      max_duration_ms: 50
+```
+
+A policy that does not compile is a **load-time** error, not a mid-run surprise. Custom findings carry span evidence like any built-in.
 
 ## Not built yet
 
 Specified in the ADRs, absent from the binary:
 
-- **Rego and CUE engines.** v0 implements the built-in clauses natively in Go. [ADR-003](docs/adrs/003-contract-lowering.md) lowers them onto Rego/CUE; the clause-registry seam is in place so swapping the backend does not change any contract.
-- **Invariants** (`refund.amount <= approved_limit`) — needs the CUE engine and value bindings ([ADR-003 §4](docs/adrs/003-contract-lowering.md)).
-- **Grounding clauses** (`cite_sources`) — needs claim extraction ([ADR-002 §4](docs/adrs/002-episode-schema.md)).
+- **Grounding clauses** (`cite_sources`, `no_unsourced_claims`) — needs claim extraction ([ADR-002 §4](docs/adrs/002-episode-schema.md)). That also gates `from: claim_value` bindings and the provenance downgrade that would make an invariant over an LLM-extracted value advisory.
 - **LLM judges** ([ADR-001 §6](docs/adrs/001-agent-admission-control.md)).
-- **Policy bundles** — v0 takes `--contract FILE`. Git and OCI resolution, lockfiles, and signing are [ADR-001 §7](docs/adrs/001-agent-admission-control.md) and [ADR-006](docs/adrs/006-oci-distribution.md).
+- **Policy bundles** — v0 takes `--contract FILE`, and custom clauses live in the contract rather than in bundle metadata. Git and OCI resolution, lockfiles, and signing are [ADR-001 §7](docs/adrs/001-agent-admission-control.md) and [ADR-006](docs/adrs/006-oci-distribution.md).
 - **WASM plugins** ([ADR-004](docs/adrs/004-wasm-plugin-abi.md)) and the **inline admission gate** ([ADR-005](docs/adrs/005-inline-admission-gate.md)).
 - `axda test`, `axda lint`, SARIF and JUnit reporters.
+- **`must_not` polarity inversion.** Every registered kind is a violation predicate and aliases carry the polarity (`expose_pii` → `content.no_pii`), so position sets severity defaults rather than inverting a clause ([ADR-003 §3](docs/adrs/003-contract-lowering.md)).
+- **`content.no_pii` is builtin-only.** [ADR-003 §2](docs/adrs/003-contract-lowering.md) pairs the detector with a Rego verdict; regex and Luhn are not expressible as policy, and the second hop bought nothing.
+
+Embedding OPA and CUE costs real weight: the binary is ~47 MB and evaluation takes ~40 ms per run, most of it one-time Rego compilation.
 
 ## Design
 
@@ -171,7 +225,13 @@ The architecture is settled in [docs/adrs](docs/adrs/summary.md) — read [the i
 go test ./...
 ```
 
-The suite asserts the three rules above directly: a clause that fails with content present must report `SKIP` — not `PASS` — when content is stripped; ten runs over one trace must produce byte-identical reports; shuffling span order must not change the output; and a masked report must not contain the card number it reports on.
+The suite asserts the three rules above directly rather than testing around them:
+
+- a clause that fails with content present reports `SKIP` — not `PASS` — when content is stripped, and an invariant whose operand never bound does the same
+- `cardinality: any` catches a bad value in *third* position, not just the first
+- ten runs over one trace produce byte-identical reports, and shuffling span order changes nothing — including through Rego, whose result sets have no inherent order
+- a masked report does not contain the card number it reports on
+- an undeclared invariant operand, a missing `cardinality`, a non-namespaced custom clause, and a Rego module that does not compile all fail at **load**, before any trace is read
 
 ## Status
 

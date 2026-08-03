@@ -7,14 +7,18 @@
 package contract
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	cueeng "github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/cue"
+	regoeng "github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/rego"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,18 +31,37 @@ type Document struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
 	Spec Spec `yaml:"spec"`
+	// Clauses declares custom clause kinds. ADR-003 §7 puts these in bundle
+	// metadata (axda.yaml); v0 has no bundles, so they live in the contract.
+	Clauses []CustomClause `yaml:"clauses"`
 }
 
 type Spec struct {
-	AllowedTools []string    `yaml:"allowed_tools"`
-	DeniedTools  []string    `yaml:"denied_tools"`
-	Must         []yaml.Node `yaml:"must"`
-	MustNot      []yaml.Node `yaml:"must_not"`
+	AllowedTools []string             `yaml:"allowed_tools"`
+	DeniedTools  []string             `yaml:"denied_tools"`
+	Values       map[string]yaml.Node `yaml:"values"`
+	Invariants   []string             `yaml:"invariants"`
+	Must         []yaml.Node          `yaml:"must"`
+	MustNot      []yaml.Node          `yaml:"must_not"`
+}
+
+// CustomClause registers a bundle-supplied clause kind. It must be namespaced;
+// the bare namespace is reserved so a contract cannot shadow `tool.allowlist`
+// and change what an existing clause means (ADR-003 §7).
+type CustomClause struct {
+	Name     string   `yaml:"name"`
+	Engine   string   `yaml:"engine"` // rego
+	Source   string   `yaml:"source"` // .rego file, relative to the contract
+	Query    string   `yaml:"query"`  // e.g. data.acme.kyc.violation
+	Requires []string `yaml:"requires"`
+	Severity string   `yaml:"severity"`
+	Reads    string   `yaml:"reads"`
 }
 
 // Clause is one bound, registered predicate.
 type Clause struct {
 	Kind     string
+	Label    string
 	Position string // must | must_not | spec
 	Params   map[string]any
 	Severity string
@@ -49,7 +72,11 @@ type Clause struct {
 type Plan struct {
 	Name    string
 	Entries []Entry
+	Values  map[string]ValueSpec
 	Hash    string
+
+	Rego *regoeng.Engine
+	CUE  *cueeng.Evaluator
 }
 
 type Entry struct {
@@ -73,13 +100,29 @@ func Load(path string) (*Plan, error) {
 	if doc.APIVersion != "" && doc.APIVersion != APIVersion {
 		return nil, fmt.Errorf("%s: apiVersion %q is not %s", path, doc.APIVersion, APIVersion)
 	}
-	return Compile(&doc)
+	return Compile(&doc, filepath.Dir(path))
 }
 
-func Compile(doc *Document) (*Plan, error) {
-	p := &Plan{Name: doc.Metadata.Name}
+func Compile(doc *Document, baseDir string) (*Plan, error) {
+	rg, err := regoeng.New()
+	if err != nil {
+		return nil, err
+	}
+	p := &Plan{
+		Name:   doc.Metadata.Name,
+		Values: map[string]ValueSpec{},
+		Rego:   rg,
+		CUE:    cueeng.NewEvaluator(),
+	}
 	if p.Name == "" {
 		p.Name = "contract"
+	}
+
+	if err := p.registerCustom(doc.Clauses, baseDir); err != nil {
+		return nil, err
+	}
+	if err := p.bindValues(doc.Spec.Values); err != nil {
+		return nil, err
 	}
 
 	if len(doc.Spec.AllowedTools) > 0 {
@@ -100,6 +143,22 @@ func Compile(doc *Document) (*Plan, error) {
 			return nil, err
 		}
 	}
+
+	for i, expr := range doc.Spec.Invariants {
+		src := fmt.Sprintf("spec.invariants[%d]", i)
+		if err := p.checkInvariantIdentifiers(expr, src); err != nil {
+			return nil, err
+		}
+		if err := p.add(Clause{
+			Kind: "invariant", Position: "spec",
+			Label:  fmt.Sprintf("invariants[%d]", i),
+			Params: map[string]any{"expr": expr},
+			Source: src,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
 	for i, n := range doc.Spec.Must {
 		c, err := parseClause(n, "must", fmt.Sprintf("spec.must[%d]", i))
 		if err != nil {
@@ -123,6 +182,142 @@ func Compile(doc *Document) (*Plan, error) {
 	}
 	p.Hash = p.computeHash()
 	return p, nil
+}
+
+func (p *Plan) bindValues(nodes map[string]yaml.Node) error {
+	names := make([]string, 0, len(nodes))
+	for n := range nodes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if err := cueeng.ValidName(name); err != nil {
+			return fmt.Errorf("spec.values: %w", err)
+		}
+		node := nodes[name]
+
+		var spec ValueSpec
+		if err := node.Decode(&spec); err != nil {
+			return fmt.Errorf("spec.values.%s: %w", name, err)
+		}
+		// yaml cannot distinguish an absent `default` from a null one, and
+		// the difference decides skip-versus-substitute.
+		var raw map[string]any
+		if err := node.Decode(&raw); err == nil {
+			_, spec.HasDefault = raw["default"]
+		}
+		if err := validateValueSpec(name, spec); err != nil {
+			return fmt.Errorf("spec.values: %w", err)
+		}
+		p.Values[name] = spec
+	}
+	return nil
+}
+
+// checkInvariantIdentifiers is the compile-time half of ADR-003 §4: an
+// expression may only reference values the contract declared, and that is
+// checked before any trace is read.
+func (p *Plan) checkInvariantIdentifiers(expr, source string) error {
+	declaredRoots := map[string]bool{}
+	for name := range p.Values {
+		root := name
+		if i := strings.IndexByte(root, '.'); i >= 0 {
+			root = root[:i]
+		}
+		declaredRoots[root] = true
+	}
+
+	var undeclared []string
+	for _, id := range cueeng.RootIdentifiers(expr) {
+		if !declaredRoots[id] {
+			undeclared = append(undeclared, id)
+		}
+	}
+	if len(undeclared) == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: invariant references undeclared value(s): %s\n",
+		source, strings.Join(undeclared, ", "))
+	b.WriteString("  every operand must say where it comes from, e.g.\n")
+	fmt.Fprintf(&b, "    values:\n      %s:\n        from: tool_call\n        tool: <tool>\n        arg: <arg>\n        cardinality: any\n", undeclared[0])
+	if len(p.Values) > 0 {
+		fmt.Fprintf(&b, "  declared: %s", strings.Join(sortedKeys(p.Values), ", "))
+	} else {
+		b.WriteString("  this contract declares no values")
+	}
+	return fmt.Errorf("%s", b.String())
+}
+
+func (p *Plan) registerCustom(clauses []CustomClause, baseDir string) error {
+	for i, cc := range clauses {
+		src := fmt.Sprintf("clauses[%d]", i)
+		if cc.Name == "" {
+			return fmt.Errorf("%s: `name` is required", src)
+		}
+		if !strings.Contains(cc.Name, ".") {
+			return fmt.Errorf("%s: custom clause %q must be namespaced (e.g. acme.%s)", src, cc.Name, cc.Name)
+		}
+		if reservedNamespace(cc.Name) {
+			return fmt.Errorf("%s: %q shadows a reserved namespace; built-in clause meanings may not be redefined", src, cc.Name)
+		}
+		if Lookup(cc.Name) != nil {
+			return fmt.Errorf("%s: clause %q is already registered", src, cc.Name)
+		}
+		if cc.Engine != "rego" {
+			return fmt.Errorf("%s: engine %q is not supported for custom clauses (v0 supports: rego)", src, cc.Engine)
+		}
+		if cc.Source == "" || cc.Query == "" {
+			return fmt.Errorf("%s: rego clauses require `source` and `query`", src)
+		}
+
+		body, err := os.ReadFile(filepath.Join(baseDir, cc.Source))
+		if err != nil {
+			return fmt.Errorf("%s: %w", src, err)
+		}
+		p.Rego.AddModule(cc.Source, string(body))
+		// Compile now so a broken policy is a load-time error, not a
+		// surprise halfway through a run.
+		if err := p.Rego.Check(context.Background(), cc.Query); err != nil {
+			return fmt.Errorf("%s: %w", src, err)
+		}
+
+		severity := cc.Severity
+		if severity == "" {
+			severity = "major"
+		}
+		reads := cc.Reads
+		if reads == "" {
+			reads = "episode"
+		}
+		register(&Kind{
+			Name:   cc.Name,
+			Engine: "rego:" + cc.Query,
+			// A custom clause is deterministic because the Rego engine has
+			// no clock, no network, and no randomness. When capability-
+			// holding WASM plugins land (ADR-004 §5) that will no longer be
+			// automatic.
+			Class:           ClassDeterministic,
+			Requires:        cc.Requires,
+			Reads:           reads,
+			DefaultSeverity: severity,
+			Positions:       []string{"must", "must_not"},
+			PrefixDecidable: true,
+			Eval:            regoClause(cc.Query),
+		})
+	}
+	return nil
+}
+
+func reservedNamespace(name string) bool {
+	for _, ns := range []string{"tool.", "order.", "content.", "budget.", "grounding.", "quality.", "invariant"} {
+		if strings.HasPrefix(name, ns) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Plan) add(c Clause) error {
@@ -153,6 +348,12 @@ func (p *Plan) add(c Clause) error {
 		c.Blocking = true
 		if v, ok := c.Params["blocking"].(bool); ok {
 			c.Blocking = v
+		}
+	}
+	if c.Label == "" {
+		c.Label = c.Kind
+		if c.Position == "must_not" {
+			c.Label = "must_not." + c.Kind
 		}
 	}
 	p.Entries = append(p.Entries, Entry{Clause: c, Kind: k})
@@ -208,7 +409,11 @@ func (p *Plan) computeHash() string {
 		}
 		return fmt.Sprint(out[i].Params) < fmt.Sprint(out[j].Params)
 	})
-	b, _ := json.Marshal(out)
+	payload := struct {
+		Entries []ent                `json:"entries"`
+		Values  map[string]ValueSpec `json:"values"`
+	}{out, p.Values}
+	b, _ := json.Marshal(payload)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])[:16]
 }
@@ -219,13 +424,31 @@ func (p *Plan) computeHash() string {
 func (p *Plan) Explain() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "plan: %s (contract %s, episode/v1)  hash=%s\n\n", p.Name, APIVersion, p.Hash)
-	for _, e := range p.Entries {
-		label := e.Clause.Kind
-		if e.Clause.Position == "must_not" {
-			label = "must_not." + e.Clause.Kind
+
+	if len(p.Values) > 0 {
+		b.WriteString("  values\n")
+		for _, name := range sortedKeys(p.Values) {
+			s := p.Values[name]
+			def := ""
+			if s.HasDefault {
+				def = fmt.Sprintf(" default=%v", s.Default)
+			}
+			fmt.Fprintf(&b, "    %-22s ← %s [%s]%s\n", name, describeSource(s), s.Cardinality, def)
 		}
-		fmt.Fprintf(&b, "  %s\n", label)
-		fmt.Fprintf(&b, "    ├─ kind      %s %s\n", e.Kind.Name, formatParams(e.Clause.Params))
+		b.WriteString("\n")
+	}
+
+	for _, e := range p.Entries {
+		fmt.Fprintf(&b, "  %s\n", e.Clause.Label)
+		if expr, ok := e.Clause.Params["expr"].(string); ok {
+			fmt.Fprintf(&b, "    ├─ expr      %q\n", expr)
+			for _, n := range ReferencedNames(expr, sortedKeys(p.Values)) {
+				fmt.Fprintf(&b, "    ├─ binds     %-20s ← %s [%s]\n",
+					n, describeSource(p.Values[n]), p.Values[n].Cardinality)
+			}
+		} else {
+			fmt.Fprintf(&b, "    ├─ kind      %s %s\n", e.Kind.Name, formatParams(e.Clause.Params))
+		}
 		fmt.Fprintf(&b, "    ├─ engine    %s\n", e.Kind.Engine)
 		fmt.Fprintf(&b, "    ├─ class     %-16s blocking: %-4t severity: %s\n",
 			e.Kind.Class, e.Clause.Blocking, e.Clause.Severity)
@@ -238,6 +461,15 @@ func (p *Plan) Explain() string {
 		fmt.Fprintf(&b, "    └─ inline    %s\n\n", inlineLabel(e.Kind.PrefixDecidable))
 	}
 	return b.String()
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func inlineLabel(ok bool) string {

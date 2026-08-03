@@ -2,6 +2,9 @@
 package evaluate
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/adapter"
@@ -17,6 +20,10 @@ type Options struct {
 }
 
 func Run(plan *contract.Plan, ep *episode.Episode, opts Options) *report.Report {
+	return RunContext(context.Background(), plan, ep, opts)
+}
+
+func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, opts Options) *report.Report {
 	if opts.Evidence == "" {
 		opts.Evidence = verdict.EvidenceMasked
 	}
@@ -41,11 +48,16 @@ func Run(plan *contract.Plan, ep *episode.Episode, opts Options) *report.Report 
 		r.Notice = "episode reconstructed from X-Ray segments: attributes may be truncated and this report must not gate a build"
 	}
 
+	// The Episode is marshalled once and shared with every Rego clause;
+	// values are bound once and shared with every invariant.
+	epJSON, jsonErr := episodeJSON(ep)
+	bindings := contract.Bind(ep, plan.Values)
+
 	var scoreEarned, scoreTotal float64
 
 	for _, e := range plan.Entries {
 		v := verdict.Verdict{
-			Clause:   clauseLabel(e.Clause),
+			Clause:   e.Clause.Label,
 			Kind:     e.Kind.Name,
 			Engine:   e.Kind.Engine,
 			Class:    e.Kind.Class,
@@ -62,12 +74,27 @@ func Run(plan *contract.Plan, ep *episode.Episode, opts Options) *report.Report 
 			continue
 		}
 
-		findings := runClause(e, ep, opts.Evidence, &v)
+		findings, err := runClause(ctx, e, ep, epJSON, bindings, plan, opts.Evidence, jsonErr)
+
+		// A clause may decide at runtime that its inputs are absent.
+		var skip *contract.SkipError
+		if errors.As(err, &skip) {
+			v.Status = verdict.Skipped
+			v.MissingCoverage = skip.Reasons
+			r.Counts.Skipped++
+			r.Verdicts = append(r.Verdicts, v)
+			continue
+		}
+
 		w := weight(e.Clause.Severity)
 		scoreTotal += w
 
 		switch {
-		case v.Status == verdict.Errored:
+		case err != nil:
+			// A broken evaluator is a failed check, not an absent one
+			// (ADR-004 §7).
+			v.Status = verdict.Errored
+			v.Message = err.Error()
 			r.Counts.Errored++
 		case len(findings) > 0:
 			v.Status = verdict.Fail
@@ -105,22 +132,47 @@ func Run(plan *contract.Plan, ep *episode.Episode, opts Options) *report.Report 
 
 // runClause isolates a panicking evaluator so a broken check is ERRORED, not
 // a crash and not a pass (ADR-004 §7).
-func runClause(e contract.Entry, ep *episode.Episode, mode verdict.EvidenceMode, v *verdict.Verdict) (out []verdict.Finding) {
+func runClause(
+	ctx context.Context,
+	e contract.Entry,
+	ep *episode.Episode,
+	epJSON map[string]any,
+	bindings map[string]contract.Binding,
+	plan *contract.Plan,
+	mode verdict.EvidenceMode,
+	jsonErr error,
+) (out []verdict.Finding, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			v.Status = verdict.Errored
-			v.Message = fmt.Sprintf("evaluator panicked: %v", rec)
-			out = nil
+			out, err = nil, fmt.Errorf("evaluator panicked: %v", rec)
 		}
 	}()
-	return e.Kind.Eval(contract.EvalContext{Episode: ep, Clause: e.Clause, Evidence: mode})
+
+	if jsonErr != nil {
+		return nil, fmt.Errorf("encode episode for policy evaluation: %w", jsonErr)
+	}
+	return e.Kind.Eval(contract.EvalContext{
+		Ctx:         ctx,
+		Episode:     ep,
+		EpisodeJSON: epJSON,
+		Clause:      e.Clause,
+		Bindings:    bindings,
+		Evidence:    mode,
+		Rego:        plan.Rego,
+		CUE:         plan.CUE,
+	})
 }
 
-func clauseLabel(c contract.Clause) string {
-	if c.Position == "must_not" {
-		return "must_not." + c.Kind
+func episodeJSON(ep *episode.Episode) (map[string]any, error) {
+	b, err := json.Marshal(ep)
+	if err != nil {
+		return nil, err
 	}
-	return c.Kind
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func passSummary(e contract.Entry, ep *episode.Episode) string {
@@ -129,6 +181,8 @@ func passSummary(e contract.Entry, ep *episode.Episode) string {
 		return fmt.Sprintf("%d tool call(s) checked", len(ep.ToolCalls))
 	case "content.no_pii", "content.deny_patterns":
 		return fmt.Sprintf("%d turn(s) scanned", len(ep.Turns))
+	case "invariant":
+		return "holds for every bound value"
 	}
 	return "ok"
 }
