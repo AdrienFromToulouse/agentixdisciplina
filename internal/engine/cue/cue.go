@@ -1,28 +1,28 @@
 // Package cue evaluates value constraints.
 //
 // CUE is the belief-layer engine: is this set of extracted values internally
-// consistent, and does it satisfy the declared constraints (ADR-003 §4)? CUE
-// rather than a bespoke expression language because these are exactly value
-// constraints under unification, and reusing it keeps one dependency doing one
-// job.
+// consistent, and does it satisfy the declared constraints (ADR-003 §4)? It
+// also unifies schemas against data for tool.args_match: an action clause on
+// this engine because schema validation *is* unification. CUE rather than a
+// bespoke expression language because these are exactly value constraints
+// under unification, and reusing it keeps one dependency doing one job.
 package cue
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
 	"cuelang.org/go/cue"
+	"cuelang.org/go/cue/ast"
 	"cuelang.org/go/cue/cuecontext"
+	"cuelang.org/go/cue/parser"
 )
 
-// resultField holds the evaluated constraint. The `axda` prefix is reserved in
-// value names so a contract cannot collide with it.
-const resultField = "axdaResult"
-
-// ReservedPrefix may not begin a declared value name.
+// ReservedPrefix may not begin a declared value name. The engine no longer
+// injects fields of its own, but the prefix stays reserved as contract-surface
+// namespace hygiene for future engine and report use.
 const ReservedPrefix = "axda"
 
 type Evaluator struct {
@@ -34,34 +34,29 @@ func NewEvaluator() *Evaluator {
 }
 
 // Constraint evaluates a boolean expression over the given values. Names may
-// be dotted (`refund.amount`); they are nested into structs before evaluation
-// so the expression reads as an ordinary CUE selector.
+// be dotted (`refund.amount`); they are nested into structs so the expression
+// reads as an ordinary CUE selector.
+//
+// The expression is parsed and built against the values as a scope; no source
+// text is assembled, so a value that happens to contain CUE syntax is inert
+// data.
 func (e *Evaluator) Constraint(expr string, vars map[string]any) (bool, error) {
 	nested, err := nest(vars)
 	if err != nil {
 		return false, err
 	}
 
-	var b strings.Builder
-	roots := make([]string, 0, len(nested))
-	for k := range nested {
-		roots = append(roots, k)
+	scope := e.ctx.Encode(nested)
+	if err := scope.Err(); err != nil {
+		return false, fmt.Errorf("encode values: %w", err)
 	}
-	sort.Strings(roots) // deterministic source text
-	for _, k := range roots {
-		enc, err := json.Marshal(nested[k])
-		if err != nil {
-			return false, fmt.Errorf("encode value %q: %w", k, err)
-		}
-		fmt.Fprintf(&b, "%s: %s\n", k, enc)
-	}
-	fmt.Fprintf(&b, "%s: %s\n", resultField, expr)
 
-	v := e.ctx.CompileString(b.String())
-	if err := v.Err(); err != nil {
+	x, err := parser.ParseExpr("constraint", expr)
+	if err != nil {
 		return false, fmt.Errorf("invalid constraint %q: %w", expr, err)
 	}
-	res := v.LookupPath(cue.ParsePath(resultField))
+
+	res := e.ctx.BuildExpr(x, cue.Scope(scope), cue.InferBuiltins(true))
 	if err := res.Err(); err != nil {
 		return false, fmt.Errorf("evaluate %q: %w", expr, err)
 	}
@@ -78,63 +73,81 @@ func (e *Evaluator) UnifySchema(schema string, data any) error {
 	if err := s.Err(); err != nil {
 		return fmt.Errorf("invalid schema: %w", err)
 	}
-	b, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	d := e.ctx.CompileBytes(b)
+	d := e.ctx.Encode(data)
 	if err := d.Err(); err != nil {
 		return fmt.Errorf("invalid data: %w", err)
 	}
 	return s.Unify(d).Validate(cue.Concrete(true))
 }
 
-var (
-	identRe   = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*`)
-	stringRe  = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`)
-	selectorR = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-)
+var selectorR = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// reserved are CUE keywords and builtins that look like identifiers but are
-// not value references.
-var reserved = map[string]bool{
-	"if": true, "for": true, "in": true, "let": true, "import": true,
-	"package": true, "true": true, "false": true, "null": true,
-	"and": true, "or": true, "div": true, "mod": true, "quo": true, "rem": true,
-	"len": true, "close": true, "list": true, "struct": true,
+// predeclared are identifiers that resolve as CUE builtins rather than value
+// references. Keywords (`if`, `for`, `let`, …) need no entry: they are
+// grammar, not identifiers, once the expression is parsed.
+var predeclared = map[string]bool{
+	"true": true, "false": true, "null": true,
+	"len": true, "close": true, "and": true, "or": true,
 	"string": true, "int": true, "float": true, "bool": true,
-	"bytes": true, "number": true, "strings": true, "math": true, "regexp": true,
+	"bytes": true, "number": true, "top": true,
+	"int8": true, "int16": true, "int32": true, "int64": true, "int128": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true, "uint128": true,
+	"float32": true, "float64": true,
+	"strings": true, "math": true, "list": true, "struct": true, "regexp": true,
+	"_": true,
 }
 
-// RootIdentifiers returns the distinct root names an expression references.
+// RootIdentifiers returns the distinct root names an expression references,
+// parsed from the CUE AST rather than approximated with regexes.
 //
 // This is what makes an undeclared identifier a compile error rather than a
 // runtime skip: the contract is checked against its own `values` block before
-// any trace is read (ADR-003 §4).
-func RootIdentifiers(expr string) []string {
-	// Strip string literals first, or words inside them read as identifiers.
-	cleaned := stringRe.ReplaceAllString(expr, `""`)
+// any trace is read (ADR-003 §4). A malformed expression is an error here,
+// which the contract compiler surfaces at load.
+func RootIdentifiers(expr string) ([]string, error) {
+	x, err := parser.ParseExpr("constraint", expr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid expression %q: %w", expr, err)
+	}
 
 	seen := map[string]bool{}
 	var out []string
-	for _, m := range identRe.FindAllString(cleaned, -1) {
-		root := m
-		if i := strings.IndexByte(root, '.'); i >= 0 {
-			root = root[:i]
+	add := func(name string) {
+		if predeclared[name] || seen[name] {
+			return
 		}
-		if reserved[root] || seen[root] {
-			continue
-		}
-		seen[root] = true
-		out = append(out, root)
+		seen[name] = true
+		out = append(out, name)
 	}
+
+	// Selector chains contribute only their root: `refund.amount` references
+	// `refund`, and `amount` is a field, not an identifier. ast.Walk would
+	// visit the field's Ident too, so the traversal descends into a
+	// SelectorExpr's operand and skips its selector; struct-literal field
+	// labels are skipped for the same reason.
+	var before func(ast.Node) bool
+	before = func(n ast.Node) bool {
+		switch t := n.(type) {
+		case *ast.SelectorExpr:
+			ast.Walk(t.X, before, nil)
+			return false
+		case *ast.Field:
+			ast.Walk(t.Value, before, nil)
+			return false
+		case *ast.Ident:
+			add(t.Name)
+		}
+		return true
+	}
+	ast.Walk(x, before, nil)
+
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // ValidName reports whether a declared value name is usable: every dotted
-// segment must be a plain CUE identifier, and the name must not shadow the
-// engine's own result field.
+// segment must be a plain CUE identifier, and the name must not use the
+// reserved prefix.
 func ValidName(name string) error {
 	if name == "" {
 		return fmt.Errorf("value name is empty")

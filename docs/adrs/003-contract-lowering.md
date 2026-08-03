@@ -86,9 +86,11 @@ Per [ADR-002 §4](002-episode-schema.md), these emit `probabilistic` verdicts wh
 
 | Clause | Params | Engine | Requires |
 |---|---|---|---|
-| `content.no_pii` (`expose_pii`) | `types[]`, `allow_in_tool_args?` | builtin + Rego | `has_message_content` |
+| `content.no_pii` (`expose_pii`) | `types[]`, `allow_in_tool_args?` | builtin | `has_message_content` |
 | `content.no_secrets` | `patterns[]` | builtin | `has_message_content` |
 | `content.deny_patterns` | `patterns[]` (RE2) | builtin | `has_message_content` |
+
+`content.no_pii` originally lowered in two hops: the builtin detector fed a Rego verdict. Regex and Luhn are not expressible as policy, so the Rego hop only relayed findings the detector had already produced — a second engine boundary to debug across that bought nothing. The detector's findings are the violation set; the clause is builtin end to end.
 
 `allow_in_tool_args` exists because sending a card number to `billing.charge` is the job, and flagging it would train users to disable the check. Policies express *where* PII may travel, not merely whether it appears.
 
@@ -192,7 +194,7 @@ plan: support-agent (contract axda.dev/v1, episode/v1)
 
   must_not.expose_pii
     ├─ kind      content.no_pii {types: [card, ssn, email]}
-    ├─ engine    builtin:axda.pii → rego:axda.content.deny
+    ├─ engine    builtin:axda.pii
     ├─ class     deterministic     blocking: yes     severity: critical
     ├─ requires  has_message_content
     ├─ reads     turns[].content, tool_calls[].arguments
@@ -268,7 +270,7 @@ Custom kinds must be namespaced; the bare namespace is reserved for built-ins so
 - **Value bindings are verbose.** Declaring an extraction for every operand is more typing than the one-line `refund.amount <= approved_limit` in the original sketch. There is no way to be both explicit and implicit; explicit wins because the failure mode of guessing is a policy that checks the wrong field and passes.
 - **The registry becomes a compatibility surface.** Changing a clause's default severity or `requires` set changes behaviour for every existing contract. Clause kinds are versioned with the contract `apiVersion` and changes are breaking changes.
 - **`must_not` inversion is not universal**, so the contract has kinds that work in one position and not the other. Compile-time rejection makes this discoverable, not silent, but it is still a wart.
-- **Two lowering targets for one clause** (`content.no_pii` runs a builtin detector and a Rego verdict) means debugging crosses an engine boundary. `axda explain` shows the chain; it is still two things.
+- **A clause that spans two engines costs an engine boundary at debug time.** `content.no_pii` was specified that way (builtin detector → Rego verdict) and the hop was removed once implementation showed it relayed findings without adding policy (§2). The rule that survives: a clause takes a second engine only when each engine contributes something the other cannot, and `axda explain` must show the chain.
 
 ### Out of scope
 

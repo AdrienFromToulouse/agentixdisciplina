@@ -275,10 +275,11 @@ func init() {
 }
 
 // evalInvariant checks a CUE constraint over declared values, once per
-// combination of `any`-cardinality bindings.
+// combination of `any`-cardinality bindings. Referenced names were resolved
+// at compile time (Clause.Refs), so nothing is re-parsed here.
 func evalInvariant(ec EvalContext) ([]verdict.Finding, error) {
 	expr, _ := ec.Clause.Params["expr"].(string)
-	names := ReferencedNames(expr, sortedKeys(ec.Bindings))
+	names := ec.Clause.Refs
 
 	// A missing operand makes the constraint unevaluable, not satisfied.
 	var reasons []string

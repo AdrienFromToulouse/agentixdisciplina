@@ -264,6 +264,28 @@ spec:
 	}
 }
 
+// A syntactically invalid expression is a load-time error naming its source
+// location, not a mid-run surprise: RootIdentifiers parses the real CUE
+// grammar, so malformed input fails where undeclared operands do.
+func TestMalformedInvariantIsCompileError(t *testing.T) {
+	_, err := load(t, `
+apiVersion: axda.dev/v1
+kind: AgentContract
+metadata: {name: m}
+spec:
+  values:
+    refund.amount: {from: tool_call, tool: billing.refund, arg: amount, cardinality: any}
+  invariants:
+    - "refund.amount <="
+`)
+	if err == nil {
+		t.Fatal("expected a compile error for the malformed expression")
+	}
+	if !strings.Contains(err.Error(), "spec.invariants[0]") {
+		t.Errorf("error should name the source location: %v", err)
+	}
+}
+
 // String literals must not be mistaken for identifiers.
 func TestStringLiteralsAreNotIdentifiers(t *testing.T) {
 	if _, err := load(t, `

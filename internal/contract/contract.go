@@ -67,6 +67,10 @@ type Clause struct {
 	Severity string
 	Blocking bool
 	Source   string // location in the contract, for error messages
+	// Refs names the declared values an invariant expression references,
+	// resolved once at compile time. Not part of the plan hash: it is derived
+	// from Params and spec.values, both already hashed.
+	Refs []string
 }
 
 type Plan struct {
@@ -162,11 +166,17 @@ func Compile(doc *Document, baseDir string) (*Plan, error) {
 		if err := p.checkInvariantIdentifiers(expr, src); err != nil {
 			return nil, err
 		}
+		refs, err := ReferencedNames(expr, sortedKeys(p.Values))
+		if err != nil {
+			// Unreachable: checkInvariantIdentifiers already parsed expr.
+			return nil, fmt.Errorf("%s: %w", src, err)
+		}
 		if err := p.add(Clause{
 			Kind: "invariant", Position: "spec",
 			Label:  fmt.Sprintf("invariants[%d]", i),
 			Params: map[string]any{"expr": expr},
 			Source: src,
+			Refs:   refs,
 		}); err != nil {
 			return nil, err
 		}
@@ -241,8 +251,13 @@ func (p *Plan) checkInvariantIdentifiers(expr, source string) error {
 		declaredRoots[root] = true
 	}
 
+	ids, err := cueeng.RootIdentifiers(expr)
+	if err != nil {
+		// A malformed expression fails here, at load, not mid-evaluation.
+		return fmt.Errorf("%s: %w", source, err)
+	}
 	var undeclared []string
-	for _, id := range cueeng.RootIdentifiers(expr) {
+	for _, id := range ids {
 		if !declaredRoots[id] {
 			undeclared = append(undeclared, id)
 		}
@@ -463,7 +478,7 @@ func (p *Plan) Explain() string {
 		fmt.Fprintf(&b, "  %s\n", e.Clause.Label)
 		if expr, ok := e.Clause.Params["expr"].(string); ok {
 			fmt.Fprintf(&b, "    ├─ expr      %q\n", expr)
-			for _, n := range ReferencedNames(expr, sortedKeys(p.Values)) {
+			for _, n := range e.Clause.Refs {
 				fmt.Fprintf(&b, "    ├─ binds     %-20s ← %s [%s]\n",
 					n, describeSource(p.Values[n]), p.Values[n].Cardinality)
 			}

@@ -69,6 +69,8 @@ Three engines, three questions ([ADR-003 §4](docs/adrs/003-contract-lowering.md
 | **CUE** | what the agent **believed** | Is this value consistent? |
 | **metric** | what the agent **cost** | Was this within budget? |
 
+The split is by question shape, not a hard domain wall: Rego answers quantified queries over the event log, CUE answers value constraints under unification. That is why `tool.args_match`, an action clause, runs on the CUE engine: validating arguments against a schema *is* unification, and [ADR-003 §2](docs/adrs/003-contract-lowering.md) assigns clauses to engines per clause, not per namespace.
+
 `axda explain` prints the full lowering, so the descent from contract to check is never a black box.
 
 ## Three rules it will not break
@@ -245,7 +247,6 @@ Specified in the ADRs, absent from the binary:
 - **WASM plugins** ([ADR-004](docs/adrs/004-wasm-plugin-abi.md)) and the **inline admission gate** ([ADR-005](docs/adrs/005-inline-admission-gate.md)).
 - `axda test`, `axda lint`, SARIF and JUnit reporters.
 - **`must_not` polarity inversion.** Every registered kind is a violation predicate and aliases carry the polarity (`expose_pii` → `content.no_pii`), so position sets severity defaults rather than inverting a clause ([ADR-003 §3](docs/adrs/003-contract-lowering.md)).
-- **`content.no_pii` is builtin-only.** [ADR-003 §2](docs/adrs/003-contract-lowering.md) pairs the detector with a Rego verdict; regex and Luhn are not expressible as policy, and the second hop bought nothing.
 
 Embedding OPA and CUE costs real weight: the binary is ~47 MB and evaluation takes ~40 ms per run, most of it one-time Rego compilation.
 

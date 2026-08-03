@@ -351,10 +351,15 @@ func knownMetric(name string) bool {
 //
 // An expression says `refund.amount`, whose root is `refund`, but bindings are
 // keyed by the full declared name. Resolving through the root is what connects
-// the two.
-func ReferencedNames(expr string, declared []string) []string {
+// the two. Called at compile time; the result is stored on the clause so
+// evaluation never re-parses the expression.
+func ReferencedNames(expr string, declared []string) ([]string, error) {
+	ids, err := cueeng.RootIdentifiers(expr)
+	if err != nil {
+		return nil, err
+	}
 	roots := map[string]bool{}
-	for _, r := range cueeng.RootIdentifiers(expr) {
+	for _, r := range ids {
 		roots[r] = true
 	}
 	var out []string
@@ -368,7 +373,7 @@ func ReferencedNames(expr string, declared []string) []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // Combinations produces the cross product of bindings, so a constraint over an
