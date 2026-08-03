@@ -115,7 +115,7 @@ func TestMissingCoverageSkipsRatherThanPasses(t *testing.T) {
 		t.Fatalf("with content: no_pii = %q, want fail", got)
 	}
 	if got := status(withoutContent, "must_not.content.no_pii"); got != verdict.Skipped {
-		t.Fatalf("without content: no_pii = %q, want skipped — a skip must never become a pass", got)
+		t.Fatalf("without content: no_pii = %q, want skipped, a skip must never become a pass", got)
 	}
 }
 

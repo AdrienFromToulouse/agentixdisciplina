@@ -19,7 +19,7 @@ That decision leaves the mechanism unspecified, and the mechanism is where sandb
 
 ### 1. wazero on a restricted WASI Preview 1, not the component model
 
-`axda` embeds [wazero](https://wazero.io/) — pure Go, no CGO, no external runtime — which preserves the single-static-binary and cross-compile properties from [ADR-001](001-agent-admission-control.md).
+`axda` embeds [wazero](https://wazero.io/) (pure Go, no CGO, no external runtime) which preserves the single-static-binary and cross-compile properties from [ADR-001](001-agent-admission-control.md).
 
 The guest targets **WASI Preview 1**, not the component model. The component model's interface story is genuinely better and would remove most of §3's hand-rolled memory protocol, but the toolchain is not there for the languages plugin authors will actually use: Go reaches `wasip1` through first-class support in the standard toolchain, and TinyGo and Rust both have mature `wasm32-wasip1` targets. Choosing the better ABI at the cost of "you cannot build this with the Go toolchain" would leave the extension path theoretical. Revisit when Go targets WASI 0.2 directly.
 
@@ -88,33 +88,33 @@ Stock `wasi_snapshot_preview1` grants a wall clock, a real entropy source, and f
 | WASI call | Behaviour |
 |---|---|
 | `clock_time_get` (realtime) | returns `episode.meta.started_at`, fixed for the whole evaluation |
-| `clock_time_get` (monotonic) | returns a counter incremented per call — ordered, reproducible, not wall-clock |
+| `clock_time_get` (monotonic) | returns a counter incremented per call (ordered, reproducible, not wall-clock) |
 | `random_get` | fills from ChaCha8 seeded with `episode_id` |
 | `fd_write` (1, 2) | captured into the plugin log, never the process's stdout |
 | `fd_*` (all other) | `ENOTCAPABLE` |
 | `environ_get`, `args_get` | empty |
 | `sock_*`, `path_*` | `ENOTCAPABLE` |
 
-`random_get` returns a seeded stream rather than an error because Go's `wasip1` runtime calls it during startup to seed map and hash iteration; returning `ENOSYS` would break every Go-authored plugin before `main`. Seeding from `episode_id` keeps a plugin that uses randomness reproducible for a given episode — which is the property that actually matters — without pretending randomness is unavailable.
+`random_get` returns a seeded stream rather than an error because Go's `wasip1` runtime calls it during startup to seed map and hash iteration; returning `ENOSYS` would break every Go-authored plugin before `main`. Seeding from `episode_id` keeps a plugin that uses randomness reproducible for a given episode (which is the property that actually matters) without pretending randomness is unavailable.
 
 The result: a plugin holding no capabilities is deterministic by construction. It cannot observe anything that varies between two runs over the same episode.
 
 ### 5. Capabilities are declared, granted, trusted, and reflected in verdict class
 
-Privileged operations are host functions in a module named `axda_host`. **Ungranted functions are not linked at all**, so a module importing one fails to instantiate — at bundle load, before a trace is read — rather than trapping halfway through an evaluation. Failing at load makes over-reach a setup error with a clear message instead of a mysterious mid-run failure.
+Privileged operations are host functions in a module named `axda_host`. **Ungranted functions are not linked at all**, so a module importing one fails to instantiate (at bundle load, before a trace is read) rather than trapping halfway through an evaluation. Failing at load makes over-reach a setup error with a clear message instead of a mysterious mid-run failure.
 
 | Host function | Capability | Effect on class |
 |---|---|---|
-| `log(ptr, len)` | none — always available | deterministic |
+| `log(ptr, len)` | none: always available | deterministic |
 | `read_file(ptr, len) -> i64` | `read_file` | **deterministic** |
 | `judge(ptr, len) -> i64` | `judge` | **probabilistic** |
 | `http_fetch(ptr, len) -> i64` | `http` | **probabilistic** |
 
-`read_file` preserves determinism because it is chrooted to the bundle directory and the bundle is content-addressed in `axda.lock` ([ADR-001 §7](001-agent-admission-control.md)) — the bytes a plugin can read are pinned by the same hash that pins the plugin itself. `judge` and `http` reach outside that hash, so verdicts from a plugin holding either are forced to `probabilistic` and cannot block the build, whatever the plugin or the contract claims.
+`read_file` preserves determinism because it is chrooted to the bundle directory and the bundle is content-addressed in `axda.lock` ([ADR-001 §7](001-agent-admission-control.md)): the bytes a plugin can read are pinned by the same hash that pins the plugin itself. `judge` and `http` reach outside that hash, so verdicts from a plugin holding either are forced to `probabilistic` and cannot block the build, whatever the plugin or the contract claims.
 
 This is [ADR-002 §4](002-episode-schema.md)'s rule applied to a second surface: determinism is a property of the whole input closure, and the host is the only party positioned to judge it.
 
-`judge` exists so an LLM-judging plugin calls back into the host's configured provider — with the host's credentials, rate limits, and caching — rather than opening its own socket. A plugin that wants to talk to a model does not need `http`, and asking for `http` when `judge` would do is a signal reviewers can act on.
+`judge` exists so an LLM-judging plugin calls back into the host's configured provider (with the host's credentials, rate limits, and caching) rather than opening its own socket. A plugin that wants to talk to a model does not need `http`, and asking for `http` when `judge` would do is a signal reviewers can act on.
 
 Grants live in bundle metadata and require explicit user acceptance:
 
@@ -142,7 +142,7 @@ $ axda evaluate --policy github.com/acme/evals@v2.0.0
 - **Time:** wall-clock deadline, default 2s per evaluation, enforced through wazero's `WithCloseOnContextDone`.
 - **Instances:** the module is compiled once per bundle and **instantiated fresh for every evaluation**. No state survives between episodes, which removes both cross-episode data leakage and the class of nondeterminism where verdict *n* depends on evaluation *n−1*.
 
-wazero has no instruction-level fuel metering (unlike wasmtime), so an infinite loop is caught by the wall-clock deadline rather than a deterministic instruction budget. That is a genuine determinism wrinkle: a plugin near the limit could time out on a loaded machine and complete on an idle one. It is acceptable only because the failure direction is safe — a timeout is `errored` (§7), and `errored` on a blocking clause fails the build. A plugin cannot get a *pass* out of being slow. The report records the deadline and the elapsed time so the flakiness is diagnosable rather than mysterious.
+wazero has no instruction-level fuel metering (unlike wasmtime), so an infinite loop is caught by the wall-clock deadline rather than a deterministic instruction budget. That is a genuine determinism wrinkle: a plugin near the limit could time out on a loaded machine and complete on an idle one. It is acceptable only because the failure direction is safe: a timeout is `errored` (§7), and `errored` on a blocking clause fails the build. A plugin cannot get a *pass* out of being slow. The report records the deadline and the elapsed time so the flakiness is diagnosable rather than mysterious.
 
 ### 7. Every failure mode resolves to `errored`, never `passed`
 
@@ -156,7 +156,7 @@ wazero has no instruction-level fuel metering (unlike wasmtime), so an infinite 
 | returns malformed protobuf | clause `errored` |
 | returns evidence referencing a span not in the episode | clause `errored` |
 
-`errored` on a blocking clause exits `1`, exactly like a violation. A broken evaluator is a failed check, not an absent one — the same reasoning that makes `skipped ≠ passed` in [ADR-003 §5](003-contract-lowering.md), applied to plugins that break rather than plugins that lack data.
+`errored` on a blocking clause exits `1`, exactly like a violation. A broken evaluator is a failed check, not an absent one: the same reasoning that makes `skipped ≠ passed` in [ADR-003 §5](003-contract-lowering.md), applied to plugins that break rather than plugins that lack data.
 
 The evidence-validation row matters more than it looks: without it a plugin could fabricate a `span_id` and produce a violation pointing at nothing, which would erode the one property [ADR-001](001-agent-admission-control.md) says every finding must have.
 
@@ -168,7 +168,7 @@ The evidence-validation row matters more than it looks: without it a plugin coul
 | TinyGo | `tinygo build -target=wasip1 -buildmode=c-shared` |
 | Rust | `cargo build --target wasm32-wasip1` with `#[no_mangle] extern "C"` |
 
-`axda plugin scaffold --lang go` generates a working evaluator with the alloc/free/evaluate boilerplate, generated Episode bindings, and a test harness. `axda plugin verify plugin.wasm` checks exports, ABI version, manifest validity, and — the useful one — that declared capabilities match actual imports in both directions: importing an undeclared function is an error, and declaring a capability the module never imports is a warning about over-privilege.
+`axda plugin scaffold --lang go` generates a working evaluator with the alloc/free/evaluate boilerplate, generated Episode bindings, and a test harness. `axda plugin verify plugin.wasm` checks exports, ABI version, manifest validity, and (the useful one) that declared capabilities match actual imports in both directions: importing an undeclared function is an error, and declaring a capability the module never imports is a warning about over-privilege.
 
 ## Architecture Overview
 
@@ -217,16 +217,16 @@ The evidence-validation row matters more than it looks: without it a plugin coul
 - **No fuel metering.** wazero's lack of instruction budgeting means the timeout is wall-clock and therefore machine-dependent. Fail-safe, but a source of CI flakiness that a wasmtime-based design would not have. Switching runtimes would cost CGO or a non-Go dependency, which is a worse trade.
 - **Full Episode copy per evaluation.** Every plugin gets the whole episode serialized into its memory; ten plugins means ten copies. No shared memory, no lazy access. Fine at current trace sizes, a problem at very large ones.
 - **A deterministic clock will surprise someone.** A plugin measuring its own elapsed time gets a counter, not milliseconds. Documented, still a footgun.
-- **Capability granularity is coarse.** `http` is all-or-nothing — no per-host allowlist in v1 — so a plugin needing one endpoint gets the whole network. Mitigated by class forcing (it cannot block the build anyway) and by `judge` covering the main legitimate use.
+- **Capability granularity is coarse.** `http` is all-or-nothing (no per-host allowlist in v1) so a plugin needing one endpoint gets the whole network. Mitigated by class forcing (it cannot block the build anyway) and by `judge` covering the main legitimate use.
 - **WASI p1 is the deprecated preview.** Choosing it buys toolchain reach today and a migration later.
 
 ### Out of scope
 
-- WASI 0.2 / the component model — revisit when the Go toolchain targets it directly.
+- WASI 0.2 / the component model: revisit when the Go toolchain targets it directly.
 - Per-host or per-URL scoping of the `http` capability.
 - Plugin-to-plugin composition or plugins that invoke other clauses.
 - Shared or streaming Episode access instead of a full copy.
-- Plugin-supplied adapters or claim extractors — [ADR-002 §4](002-episode-schema.md) allows `extractor: plugin` in the schema, but the extractor ABI is deferred.
+- Plugin-supplied adapters or claim extractors. [ADR-002 §4](002-episode-schema.md) allows `extractor: plugin` in the schema, but the extractor ABI is deferred.
 - A plugin registry or discovery service; distribution is [ADR-006](006-oci-distribution.md)'s problem.
 
 ## Verification
@@ -244,9 +244,9 @@ The evidence-validation row matters more than it looks: without it a plugin coul
 
 ## References
 
-- [ADR-001](001-agent-admission-control.md) — chose WASM, and why the sandbox is load-bearing
-- [ADR-002](002-episode-schema.md) — Episode is the wire type; provenance determines verdict class
-- [ADR-003](003-contract-lowering.md) — plugin clause kinds register into the namespaced registry
-- [ADR-006](006-oci-distribution.md) — plugin layers and signature verification
-- [wazero](https://wazero.io/) — pure-Go WebAssembly runtime
-- [Go WASI support](https://go.dev/blog/wasi) — `GOOS=wasip1`, `//go:wasmexport`, reactor builds
+- [ADR-001](001-agent-admission-control.md): chose WASM, and why the sandbox is load-bearing
+- [ADR-002](002-episode-schema.md): Episode is the wire type; provenance determines verdict class
+- [ADR-003](003-contract-lowering.md): plugin clause kinds register into the namespaced registry
+- [ADR-006](006-oci-distribution.md): plugin layers and signature verification
+- [wazero](https://wazero.io/): pure-Go WebAssembly runtime
+- [Go WASI support](https://go.dev/blog/wasi): `GOOS=wasip1`, `//go:wasmexport`, reactor builds

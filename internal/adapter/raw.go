@@ -1,6 +1,6 @@
 // Package adapter decodes traces into the normalized Episode model (ADR-002).
 //
-// Both supported sources — OTLP payloads and CloudWatch `aws/spans` records —
+// Both supported sources (OTLP payloads and CloudWatch `aws/spans` records)
 // carry the same GenAI semantic-convention vocabulary in different envelopes,
 // so they converge on RawSpan and share all mapping below (ADR-007 §4).
 package adapter
@@ -32,24 +32,24 @@ type RawSpan struct {
 
 // GenAI semantic-convention attribute keys (ADR-002 §3).
 const (
-	attrOperation   = "gen_ai.operation.name"
-	attrAgentName   = "gen_ai.agent.name"
-	attrToolName    = "gen_ai.tool.name"
-	attrToolType    = "gen_ai.tool.type"
-	attrToolArgs    = "gen_ai.tool.call.arguments"
-	attrToolResult  = "gen_ai.tool.call.result"
-	attrInputMsgs   = "gen_ai.input.messages"
-	attrOutputMsgs  = "gen_ai.output.messages"
-	attrReqModel    = "gen_ai.request.model"
-	attrRespModel   = "gen_ai.response.model"
-	attrProvider    = "gen_ai.provider.name"
-	attrInTokens    = "gen_ai.usage.input_tokens"
-	attrOutTokens   = "gen_ai.usage.output_tokens"
-	attrSystem      = "gen_ai.system" // legacy provider key
-	attrPromptDep   = "gen_ai.prompt"
-	attrComplDep    = "gen_ai.completion"
-	attrSessionID   = "session.id"
-	attrAWSSession  = "aws.bedrock.agentcore.session.id"
+	attrOperation  = "gen_ai.operation.name"
+	attrAgentName  = "gen_ai.agent.name"
+	attrToolName   = "gen_ai.tool.name"
+	attrToolType   = "gen_ai.tool.type"
+	attrToolArgs   = "gen_ai.tool.call.arguments"
+	attrToolResult = "gen_ai.tool.call.result"
+	attrInputMsgs  = "gen_ai.input.messages"
+	attrOutputMsgs = "gen_ai.output.messages"
+	attrReqModel   = "gen_ai.request.model"
+	attrRespModel  = "gen_ai.response.model"
+	attrProvider   = "gen_ai.provider.name"
+	attrInTokens   = "gen_ai.usage.input_tokens"
+	attrOutTokens  = "gen_ai.usage.output_tokens"
+	attrSystem     = "gen_ai.system" // legacy provider key
+	attrPromptDep  = "gen_ai.prompt"
+	attrComplDep   = "gen_ai.completion"
+	attrSessionID  = "session.id"
+	attrAWSSession = "aws.bedrock.agentcore.session.id"
 )
 
 type message struct {
@@ -76,14 +76,14 @@ func BuildEpisode(spans []RawSpan, adapterName string) (*episode.Episode, error)
 	}
 
 	var (
-		seenTurn         = map[string]bool{}
-		modelDurations   []int64
-		toolArgsTotal    int
-		toolArgsMissing  int
-		toolResTotal     int
-		toolResMissing   int
-		anyContentAttr   bool
-		modelSet         = map[string]bool{}
+		seenTurn        = map[string]bool{}
+		modelDurations  []int64
+		toolArgsTotal   int
+		toolArgsMissing int
+		toolResTotal    int
+		toolResMissing  int
+		anyContentAttr  bool
+		modelSet        = map[string]bool{}
 	)
 
 	ep.Meta.StartedAt = ordered[0].StartNano

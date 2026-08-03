@@ -23,7 +23,7 @@ import (
 
 var version = "0.1.0-dev"
 
-const usage = `axda — out-of-band evaluation for AI agents
+const usage = `axda: out-of-band evaluation for AI agents
 
 usage:
   axda evaluate   --contract FILE (--trace FILE | --from cloudwatch --session ID)

@@ -40,7 +40,7 @@ type Binding struct {
 	// `any` this may be several; the constraint must hold for all of them.
 	Values []Bound
 	// Missing is set when nothing matched and no default was declared. The
-	// clause then reports SKIPPED — never a vacuous pass (ADR-003 §4).
+	// clause then reports SKIPPED: never a vacuous pass (ADR-003 §4).
 	Missing bool
 	Reason  string
 	// CardinalityViolation is set when `exactly_one` did not match exactly
@@ -49,7 +49,7 @@ type Binding struct {
 	CardinalityViolation string
 	Span                 episode.SpanRef
 	// Varies is set for `any` cardinality. Evidence for a failed constraint
-	// should anchor to the value that iterates — the refund that was too
+	// should anchor to the value that iterates: the refund that was too
 	// large, not the lookup that supplied the limit.
 	Varies bool
 }

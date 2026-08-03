@@ -2,7 +2,7 @@
 // evaluators (ADR-003).
 //
 // Clause names resolve against a closed registry. An unknown name is a compile
-// error, never a prompt — a contract that reads like prose but is *understood*
+// error, never a prompt: a contract that reads like prose but is *understood*
 // like prose would be a prompt with YAML syntax (ADR-003 §1).
 package contract
 
@@ -473,7 +473,7 @@ func (p *Plan) Explain() string {
 		fmt.Fprintf(&b, "    ├─ engine    %s\n", e.Kind.Engine)
 		fmt.Fprintf(&b, "    ├─ class     %-16s blocking: %-4t severity: %s\n",
 			e.Kind.Class, e.Clause.Blocking, e.Clause.Severity)
-		req := "—"
+		req := ", "
 		if len(e.Kind.Requires) > 0 {
 			req = strings.Join(e.Kind.Requires, ", ")
 		}

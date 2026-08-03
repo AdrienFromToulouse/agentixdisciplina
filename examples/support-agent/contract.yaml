@@ -5,7 +5,7 @@ metadata:
 
 spec:
   # Every invariant operand says where it comes from. An undeclared identifier
-  # is a compile error, and `cardinality` is required rather than defaulted —
+  # is a compile error, and `cardinality` is required rather than defaulted:
   # a policy that silently checks only the first of five refunds is the exact
   # bug this field prevents (ADR-003 §4).
   values:

@@ -7,13 +7,13 @@
 
 ## Context
 
-[ADR-001](001-agent-admission-control.md) decided that evaluators never see raw spans — an adapter decodes OTLP into a normalized `Episode`, and evaluators are written against `episode/v1`. It sketched five field groups and stopped. This ADR specifies the schema, the mapping from OTel GenAI attributes onto it, and the three problems that mapping surfaces.
+[ADR-001](001-agent-admission-control.md) decided that evaluators never see raw spans: an adapter decodes OTLP into a normalized `Episode`, and evaluators are written against `episode/v1`. It sketched five field groups and stopped. This ADR specifies the schema, the mapping from OTel GenAI attributes onto it, and the three problems that mapping surfaces.
 
 ### Problem 1: the content we need is opt-in and off by default
 
 The GenAI conventions define `gen_ai.input.messages` and `gen_ai.output.messages` as JSON arrays of `{role, parts[]}` objects (superseding the deprecated `gen_ai.prompt` / `gen_ai.completion`). Tool arguments and results have equivalent attributes.
 
-**All of this content is off by default.** It is explicitly recognised as carrying user data and PII, so instrumentations gate it behind opt-in configuration. A perfectly conforming, production-grade trace routinely contains span names, tool names, timings, and token counts — and no message bodies and no tool arguments at all.
+**All of this content is off by default.** It is explicitly recognised as carrying user data and PII, so instrumentations gate it behind opt-in configuration. A perfectly conforming, production-grade trace routinely contains span names, tool names, timings, and token counts, and no message bodies and no tool arguments at all.
 
 This is not an edge case to handle defensively. It is the modal trace. It means:
 
@@ -22,7 +22,7 @@ This is not an edge case to handle defensively. It is the modal trace. It means:
 - `cite_sources` cannot run without output content
 - `allowed_tools` runs fine, because tool *names* are in the span name
 
-An evaluator that reports "pass" because the content it needed was absent is worse than no evaluator. So coverage is not metadata about the Episode — it is part of the Episode, and it is the input to the `skipped` machinery in [ADR-003](003-contract-lowering.md).
+An evaluator that reports "pass" because the content it needed was absent is worse than no evaluator. So coverage is not metadata about the Episode: it is part of the Episode, and it is the input to the `skipped` machinery in [ADR-003](003-contract-lowering.md).
 
 ### Problem 2: traces are trees, policies are queries over sequences
 
@@ -49,7 +49,7 @@ Episode (episode/v1)
   └─ spans      []SpanRef        raw span index, for evidence resolution
 ```
 
-Nothing in the Episode is nullable-by-convention. Absent data is absent *and* recorded in `coverage`, so an evaluator can distinguish "no tool calls happened" from "tool calls happened but were not captured" — a distinction that determines whether a clause passes or is skipped.
+Nothing in the Episode is nullable-by-convention. Absent data is absent *and* recorded in `coverage`, so an evaluator can distinguish "no tool calls happened" from "tool calls happened but were not captured": a distinction that determines whether a clause passes or is skipped.
 
 ### 2. Field-level schema
 
@@ -145,7 +145,7 @@ Versioning the adapter also lets the same attribute vocabulary arrive in a diffe
 | `metrics.tool_calls` | count of spans with `gen_ai.operation.name = execute_tool` |
 | `metrics.latency_*` | span durations over `chat` spans |
 
-Span-name parsing is a deliberate fallback, not the primary path: v1.41 requires the tool name in the span name (`execute_tool {gen_ai.tool.name}`), which makes tool identity recoverable even from traces that captured nothing else. That single guarantee is why `allowed_tools` — the highest-value clause — works on the modal trace.
+Span-name parsing is a deliberate fallback, not the primary path: v1.41 requires the tool name in the span name (`execute_tool {gen_ai.tool.name}`), which makes tool identity recoverable even from traces that captured nothing else. That single guarantee is why `allowed_tools` (the highest-value clause) works on the modal trace.
 
 Deprecated `gen_ai.prompt` / `gen_ai.completion` are read as a compatibility fallback and set `coverage.degraded`.
 
@@ -153,9 +153,9 @@ Deprecated `gen_ai.prompt` / `gen_ai.completion` are read as a compatibility fal
 
 `Claim` is the only Episode field that is *inferred* rather than *read*. Claims can be extracted three ways, and the extractor is recorded:
 
-- **`structural`** — citation markers in the output, tool-result references, fields of a structured response. Deterministic.
-- **`llm`** — an extractor model reads the output and emits claims. Not deterministic.
-- **`plugin`** — a WASM extractor ([ADR-004](004-wasm-plugin-abi.md)); deterministic iff it holds no capabilities.
+- **`structural`**: citation markers in the output, tool-result references, fields of a structured response. Deterministic.
+- **`llm`**: an extractor model reads the output and emits claims. Not deterministic.
+- **`plugin`**: a WASM extractor ([ADR-004](004-wasm-plugin-abi.md)); deterministic iff it holds no capabilities.
 
 **Rule: a verdict is `deterministic` only if every Episode field it read is deterministic.** A CUE evaluator is a deterministic engine, but a CUE rule reading `claims[].text` where `extractor = llm` produces a `probabilistic` verdict and therefore does not block the build.
 
@@ -163,7 +163,7 @@ This is the same principle [ADR-004](004-wasm-plugin-abi.md) applies to capabili
 
 ### 5. Deterministic identity and total ordering
 
-`episode_id` is `sha256` over the trace id plus the sorted span-id set — stable across re-runs, and changes if the trace changes.
+`episode_id` is `sha256` over the trace id plus the sorted span-id set: stable across re-runs, and changes if the trace changes.
 
 Ordering is a defined total order applied to every list, so index-based references are stable:
 
@@ -171,13 +171,13 @@ Ordering is a defined total order applied to every list, so index-based referenc
 2. tie → parent-before-child (topological, by span parentage)
 3. tie → `span_id` lexicographic ascending
 
-Rule 3 is arbitrary but total, which is the only property that matters. Concurrent tool calls therefore get a stable, if semantically meaningless, relative order — and [ADR-003](003-contract-lowering.md) ordering clauses are specified to treat overlapping spans as *unordered*, so no policy can accidentally depend on rule 3.
+Rule 3 is arbitrary but total, which is the only property that matters. Concurrent tool calls therefore get a stable, if semantically meaningless, relative order, and [ADR-003](003-contract-lowering.md) ordering clauses are specified to treat overlapping spans as *unordered*, so no policy can accidentally depend on rule 3.
 
 ### 6. Multi-agent traces flatten into one Episode with `agent_path`
 
-Nested `invoke_agent` spans do not create nested Episodes. They flatten into the parent's lists, and every element carries `agent_path` — a slash-joined chain of agent names (`support/billing-specialist`).
+Nested `invoke_agent` spans do not create nested Episodes. They flatten into the parent's lists, and every element carries `agent_path`: a slash-joined chain of agent names (`support/billing-specialist`).
 
-A nested agent invocation appears **twice**, deliberately: once as a `ToolCall` with `kind: agent` (so `allowed_tools` can govern which sub-agents may be delegated to — delegation *is* an action), and once as the source of the turns and tool calls it contributed (each tagged with its `agent_path`).
+A nested agent invocation appears **twice**, deliberately: once as a `ToolCall` with `kind: agent` (so `allowed_tools` can govern which sub-agents may be delegated to, since delegation *is* an action), and once as the source of the turns and tool calls it contributed (each tagged with its `agent_path`).
 
 Contracts scope with `agent_path` selectors. One Episode per root `invoke_agent`; a trace containing several roots yields several Episodes and `axda evaluate` reports on each.
 
@@ -185,9 +185,9 @@ Contracts scope with `agent_path` selectors. One Episode per root `invoke_agent`
 
 The Episode holds full content in memory because evaluators need it. The *report* does not: evidence excerpts are capped (256 bytes) and pass through `--evidence`:
 
-- `full` — verbatim excerpt
-- `masked` (default) — detected sensitive spans replaced with `[redacted:card]`, surrounding context kept
-- `none` — span reference and path only, no excerpt
+- `full`: verbatim excerpt
+- `masked` (default): detected sensitive spans replaced with `[redacted:card]`, surrounding context kept
+- `none`: span reference and path only, no excerpt
 
 `masked` is the default because the highest-value finding this tool produces is "your agent leaked a card number", and writing that card number into a CI log that gets archived would reproduce the exact harm being reported.
 
@@ -220,7 +220,7 @@ The Episode holds full content in memory because evaluators need it. The *report
 ### Benefits
 
 - Bundles are written against a schema we control, so a GenAI convention revision is one adapter change rather than an ecosystem-wide break.
-- Flat ordered lists make the common policy shapes — set membership, ordering, counting — one-liners in Rego instead of tree walks.
+- Flat ordered lists make the common policy shapes (set membership, ordering, counting) one-liners in Rego instead of tree walks.
 - `Coverage` turns "we couldn't check this" from an invisible pass into an explicit, reportable state.
 - Provenance-propagates-to-class closes the loophole where a strict engine over an inferred input would yield a falsely blocking verdict.
 - Every field carries a `SpanRef`, so [ADR-001](001-agent-admission-control.md)'s "no finding without evidence" rule is structurally enforceable rather than a convention.
@@ -228,7 +228,7 @@ The Episode holds full content in memory because evaluators need it. The *report
 
 ### Trade-offs
 
-- **Opt-in content caps what is checkable out of the box.** Most users' first run will skip the content clauses. Mitigation is documentation and `axda lint --trace`, which prints the exact instrumentation flag needed to enable each skipped clause — turning the limitation into an actionable setup step rather than a dead end. It remains the top adoption friction.
+- **Opt-in content caps what is checkable out of the box.** Most users' first run will skip the content clauses. Mitigation is documentation and `axda lint --trace`, which prints the exact instrumentation flag needed to enable each skipped clause: turning the limitation into an actionable setup step rather than a dead end. It remains the top adoption friction.
 - **Flattening discards tree structure.** A policy that genuinely needs nesting depth has only `agent_path` to work with. Accepted: no v1 clause needs more, and `spans[]` is retained as an escape hatch.
 - **Claim extraction is the weakest link in the schema.** Structural extraction only finds claims the agent bothered to mark, so `cite_sources` under-detects on unstructured prose. The LLM extractor covers that but downgrades the verdict to advisory. There is no third option; this is an honest limit of the approach.
 - **The adapter is a permanent maintenance commitment** tracking a Development-stability spec that changed repositories two months ago.
@@ -236,11 +236,11 @@ The Episode holds full content in memory because evaluators need it. The *report
 
 ### Out of scope
 
-- Streaming or incremental Episode construction — [ADR-005](005-inline-admission-gate.md) needs it and specifies prefix semantics there.
+- Streaming or incremental Episode construction. [ADR-005](005-inline-admission-gate.md) needs it and specifies prefix semantics there.
 - Adapters for framework-native formats. Backend-envelope adapters over the same semantic-convention vocabulary are in scope and specified per host ([ADR-007](007-agentcore-trace-acquisition.md)); adapters that would require a *different* vocabulary are not.
 - Cross-episode identity (session stitching, user journeys).
 - Metric-signal ingestion; v1 reads spans only.
-- Cost derivation for unknown models — `cost_usd` is nil rather than guessed.
+- Cost derivation for unknown models: `cost_usd` is nil rather than guessed.
 
 ## Verification
 
@@ -254,8 +254,8 @@ The Episode holds full content in memory because evaluators need it. The *report
 
 ## References
 
-- [ADR-001](001-agent-admission-control.md) — Agent Admission Control (mandates the normalization layer)
-- [ADR-003](003-contract-lowering.md) — Contract lowering (consumes `Coverage` to produce `skipped`)
-- [ADR-004](004-wasm-plugin-abi.md) — Plugin ABI (Episode is the wire type)
-- [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — `invoke_agent` / `chat` / `execute_tool` spans, `gen_ai.input.messages` schema, opt-in content capture
-- [GenAI attribute registry](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/) — canonical attribute list
+- [ADR-001](001-agent-admission-control.md): Agent Admission Control (mandates the normalization layer)
+- [ADR-003](003-contract-lowering.md): Contract lowering (consumes `Coverage` to produce `skipped`)
+- [ADR-004](004-wasm-plugin-abi.md): Plugin ABI (Episode is the wire type)
+- [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/): `invoke_agent` / `chat` / `execute_tool` spans, `gen_ai.input.messages` schema, opt-in content capture
+- [GenAI attribute registry](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/): canonical attribute list

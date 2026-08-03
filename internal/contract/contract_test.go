@@ -173,7 +173,7 @@ func TestInvariantSkipsWhenValueMissing(t *testing.T) {
 	r := run(t, p, ep(nil, 900))
 	v := status(t, r, "invariants[0]")
 	if v.Status != verdict.Skipped {
-		t.Fatalf("missing operand must skip, got %s — a vacuous pass is the worst outcome available", v.Status)
+		t.Fatalf("missing operand must skip, got %s: a vacuous pass is the worst outcome available", v.Status)
 	}
 	if r.Gate != "pass" {
 		t.Errorf("a skip alone should not fail the gate, got %q", r.Gate)

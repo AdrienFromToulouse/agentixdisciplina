@@ -50,7 +50,7 @@ var (
 // Structural extracts claims deterministically: a sentence in an assistant
 // turn that asserts at least one concrete value.
 //
-// Support is established by value provenance — a claim is supported when the
+// Support is established by value provenance: a claim is supported when the
 // concrete values it asserts appear in a tool result that completed before the
 // turn was produced. Explicit citation markers count too.
 func Structural(ep *episode.Episode) []episode.Claim {
@@ -194,7 +194,7 @@ func valueAppearsBefore(ep *episode.Episode, turn episode.Turn, tok Token) bool 
 // that produced this turn began. Overlapping spans are unordered, matching the
 // rule the Rego ordering clauses use (ADR-003 §2).
 //
-// A turn can only be grounded in results that existed when it was written —
+// A turn can only be grounded in results that existed when it was written:
 // without this check, a claim would count a *later* tool call as its source.
 func completedBefore(tc episode.ToolCall, turn episode.Turn) bool {
 	if tc.EndedAt == 0 || turn.StartedAt == 0 {

@@ -17,7 +17,7 @@ const (
 
 // DecodeCloudWatchSpans reads records from the CloudWatch `aws/spans` log
 // group. Those records hold OTel spans in semantic-convention format with W3C
-// trace ids, so the mapping is the same as OTLP's — only the envelope differs
+// trace ids, so the mapping is the same as OTLP's: only the envelope differs
 // (ADR-007 §4).
 //
 // AWS does not publish a stable JSON schema for these records, so decoding is

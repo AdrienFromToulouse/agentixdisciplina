@@ -2,7 +2,7 @@
 //
 // Rego is the action-layer engine: permissions and sequencing over the tool
 // log (ADR-003 §4). Built-in clauses and bundle-declared custom clauses run
-// through the same engine, which is the point — one evaluation path, one set
+// through the same engine, which is the point: one evaluation path, one set
 // of performance characteristics, and an `axda explain` that does not lie
 // about which engine ran.
 package rego
@@ -116,7 +116,7 @@ func (e *Engine) Eval(ctx context.Context, query string, in Input) ([]Finding, e
 	}
 
 	// Rego produces a *set*, whose iteration order is not stable. Sorting
-	// here is what keeps reports byte-identical across runs (ADR-001 §6) —
+	// here is what keeps reports byte-identical across runs (ADR-001 §6):
 	// without it the determinism guarantee would silently depend on OPA's
 	// internal hashing.
 	sort.Slice(out, func(i, j int) bool {

@@ -22,7 +22,7 @@ func init() {
 		Requires: []string{episode.HasMessageContent, episode.HasToolResults},
 		Reads:    "claims[].support", DefaultSeverity: "major",
 		Positions: []string{"must"},
-		// Cannot be satisfied on a prefix — the agent may cite later
+		// Cannot be satisfied on a prefix: the agent may cite later
 		// (ADR-005 §2).
 		PrefixDecidable: false,
 		Eval:            evalCiteSources,
@@ -78,7 +78,7 @@ func init() {
 		Name: "quality.tone", Engine: "judge", Class: ClassProbabilistic,
 		Requires: []string{episode.HasMessageContent},
 		Reads:    "turns[]", DefaultSeverity: "minor",
-		Positions:      []string{"must"}, PrefixDecidable: false,
+		Positions: []string{"must"}, PrefixDecidable: false,
 		RequiredParams: []string{"style"},
 		Eval:           judgeClause(rubricTone),
 	})
@@ -98,7 +98,7 @@ pursued unrelated work, volunteered unrequested actions, or drifted onto a
 different subject.`
 
 	rubricTone = `The assistant's tone matches the required style, given below. Judge tone
-only — not correctness, not completeness.`
+only: not correctness, not completeness.`
 )
 
 // evalCiteSources checks each claim's support count by CUE unification. The
@@ -136,7 +136,7 @@ func evalCiteSources(ec EvalContext) ([]verdict.Finding, error) {
 }
 
 // evalNoUnsourcedClaims traces each asserted value back to a tool result. A
-// value the agent passed in, or one the user supplied, counts as sourced —
+// value the agent passed in, or one the user supplied, counts as sourced:
 // only values that appear nowhere are inventions.
 func evalNoUnsourcedClaims(ec EvalContext) ([]verdict.Finding, error) {
 	types := strSlice(ec.Clause.Params["value_types"])
@@ -161,7 +161,7 @@ func evalNoUnsourcedClaims(ec EvalContext) ([]verdict.Finding, error) {
 }
 
 // judgeClause adapts a rubric to the clause interface. A judge that is not
-// configured is a SKIP; a judge that fails or errors is ERRORED — and because
+// configured is a SKIP; a judge that fails or errors is ERRORED, and because
 // judges are probabilistic, neither can fail the build unless the clause
 // explicitly opted into blocking.
 func judgeClause(defaultRubric string) func(EvalContext) ([]verdict.Finding, error) {
@@ -235,7 +235,7 @@ func claimEvidence(ec EvalContext, c episode.Claim) verdict.Evidence {
 }
 
 // claimText renders claim text for a finding. Claim text is raw agent output,
-// so the detector runs over it — a grounding finding must not carry a card
+// so the detector runs over it: a grounding finding must not carry a card
 // number out with it. It masks only what it can detect; an excerpt is still
 // model output, and `--evidence=none` is the lever when that is unacceptable.
 func claimText(ec EvalContext, c episode.Claim, n int) string {

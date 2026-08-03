@@ -4,13 +4,13 @@
 
 <h1 align="center">axda</h1>
 
-<p align="center"><em>Agent Admission Control — out-of-band evaluation for AI agents.</em></p>
+<p align="center"><em>Agent Admission Control: out-of-band evaluation for AI agents.</em></p>
 
 ---
 
 `axda` reads a recorded agent trace, checks it against a contract, and emits a reliability score, a violation list, and span-anchored evidence.
 
-The agent never knows it exists. No SDK, no callback, no middleware, no import — the only coupling is the OpenTelemetry trace the agent already emits. The same relationship Kubernetes admission controllers have to pods, and CI security scanners have to application code.
+The agent never knows it exists. No SDK, no callback, no middleware, no import: the only coupling is the OpenTelemetry trace the agent already emits. The same relationship Kubernetes admission controllers have to pods, and CI security scanners have to application code.
 
 ```
 axda evaluate --contract agent.yaml --trace trace.json
@@ -59,7 +59,7 @@ spec:
       allow_in_tool_args: [email.send]     # sending an address to email.send is the job
 ```
 
-Clause names resolve against a closed registry. An unknown name is a **compile error, never a prompt** — a contract that reads like prose but is *understood* like prose would just be a prompt with YAML syntax. The same applies to invariants: an operand you did not declare fails at compile time, before any trace is read.
+Clause names resolve against a closed registry. An unknown name is a **compile error, never a prompt**: a contract that reads like prose but is *understood* like prose would just be a prompt with YAML syntax. The same applies to invariants: an operand you did not declare fails at compile time, before any trace is read.
 
 Three engines, three questions ([ADR-003 §4](docs/adrs/003-contract-lowering.md)):
 
@@ -75,7 +75,7 @@ Three engines, three questions ([ADR-003 §4](docs/adrs/003-contract-lowering.md
 
 **A skip is never a pass.** GenAI message content is opt-in and off by default, so most real traces cannot support a PII check. When that happens the clause reports `SKIP` with the exact environment variable that would fix it. It never reports green.
 
-**Determinism is a property of the whole input closure.** Only deterministic verdicts fail a build. Anything downstream of an LLM — a judge, an inferred claim — is advisory unless you explicitly opt in, because a check that goes red on a rerun gets disabled within a month.
+**Determinism is a property of the whole input closure.** Only deterministic verdicts fail a build. Anything downstream of an LLM (a judge, an inferred claim) is advisory unless you explicitly opt in, because a check that goes red on a rerun gets disabled within a month.
 
 **No finding without a span.** Every violation resolves to a `trace_id`/`span_id`. A finding you cannot navigate to is a vibe with a severity label.
 
@@ -127,13 +127,13 @@ then you are already emitting everything `axda` needs.
 
 **1. Enable CloudWatch Transaction Search** (account-level, once). AgentCore delivers spans to the shared `aws/spans` log group, in OTel semantic-convention format with W3C trace ids, at 100% ingestion.
 
-**2. Turn on content capture** — the only environment variable you add:
+**2. Turn on content capture**: the only environment variable you add:
 
 ```
 OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
 ```
 
-Without it, tool and budget clauses still work; content clauses report `SKIP`. Note that with it, prompts and tool arguments land in CloudWatch — set a short retention on the log group.
+Without it, tool and budget clauses still work; content clauses report `SKIP`. Note that with it, prompts and tool arguments land in CloudWatch: set a short retention on the log group.
 
 **3. Fetch and evaluate:**
 
@@ -164,10 +164,10 @@ Or in one step:
 | Trace fetch | CloudWatch by session id or trace id, with settle-polling and `--raw` |
 | **Rego** clauses | `tool.allowlist` · `tool.denylist` · `tool.call_limit` · `order.requires_precondition` · `order.before` |
 | **CUE** clauses | `invariants` with declared value bindings · `tool.args_match` · `grounding.cite_sources` |
-| **judge** clauses | `quality.judge` · `quality.helpful` · `quality.on_topic` · `quality.tone` · `grounding.judge` — advisory, cached |
+| **judge** clauses | `quality.judge` · `quality.helpful` · `quality.on_topic` · `quality.tone` · `grounding.judge`: advisory, cached |
 | builtin clauses | `content.no_pii` (Luhn-checked) · `content.deny_patterns` · `grounding.no_unsourced_claims` |
 | metric clauses | `budget.max_{duration_ms,steps,tokens,tool_errors}` |
-| Claim extraction | structural and deterministic — a sentence asserting a concrete value, grounded against tool results that completed *before* the turn |
+| Claim extraction | structural and deterministic: a sentence asserting a concrete value, grounded against tool results that completed *before* the turn |
 | Value bindings | `from: tool_call \| tool_result \| metric \| literal`, JSONPath-lite, `cardinality: any \| first \| last \| exactly_one`, `default` |
 | Custom clauses | namespaced Rego declared in the contract, compiled and checked at load |
 | Coverage | `SKIP` with remediation hints; `--fail-on-skipped` to gate on instrumentation |
@@ -176,7 +176,7 @@ Or in one step:
 
 ### Custom clauses
 
-Bring your own Rego. It must be namespaced — the bare namespaces are reserved so a contract cannot shadow `tool.allowlist` and change what an existing clause means.
+Bring your own Rego. It must be namespaced: the bare namespaces are reserved so a contract cannot shadow `tool.allowlist` and change what an existing clause means.
 
 ```yaml
 clauses:
@@ -195,7 +195,7 @@ A policy that does not compile is a **load-time** error, not a mid-run surprise.
 
 ### LLM judges
 
-Judges filter what the agent *said* — helpfulness, tone, groundedness. They are **advisory**: a judge verdict never fails the build unless the clause sets `blocking: true`, and because `Blocks()` requires the deterministic class, even that cannot make a probabilistic verdict gate.
+Judges filter what the agent *said*: helpfulness, tone, groundedness. They are **advisory**: a judge verdict never fails the build unless the clause sets `blocking: true`, and because `Blocks()` requires the deterministic class, even that cannot make a probabilistic verdict gate.
 
 ```yaml
   must:
@@ -212,7 +212,7 @@ export ANTHROPIC_API_KEY=...
 ./axda evaluate -c agent.yaml -t trace.json --judge-model claude-opus-5 --judge-effort medium
 ```
 
-With no credentials, judge clauses report `SKIP` with the reason — never `PASS`. Verdicts carry `model_id`, `prompt_hash`, and `effort` as provenance, and are cached in `.axda/judge-cache.json` keyed by all three, so re-running over an unchanged trace is stable and free. Caching does not make a judge deterministic — which is exactly why they stay advisory.
+With no credentials, judge clauses report `SKIP` with the reason: never `PASS`. Verdicts carry `model_id`, `prompt_hash`, and `effort` as provenance, and are cached in `.axda/judge-cache.json` keyed by all three, so re-running over an unchanged trace is stable and free. Caching does not make a judge deterministic, which is exactly why they stay advisory.
 
 Default model is `claude-opus-5` at `effort: low`, since scoring a transcript against a rubric is a scoped classification task. Both are per-run flags.
 
@@ -220,8 +220,8 @@ Default model is `claude-opus-5` at `effort: low`, since scoring a transcript ag
 
 Specified in the ADRs, absent from the binary:
 
-- **LLM claim extraction.** Only the `structural` extractor exists, so `cite_sources` under-detects on unstructured prose — it finds claims that assert a concrete value (a number, amount, date, or identifier) and nothing else. That also gates `from: claim_value` value bindings and the provenance downgrade that would make an invariant over an LLM-extracted value advisory ([ADR-002 §4](docs/adrs/002-episode-schema.md)).
-- **Policy bundles** — v0 takes `--contract FILE`, and custom clauses live in the contract rather than in bundle metadata. Git and OCI resolution, lockfiles, and signing are [ADR-001 §7](docs/adrs/001-agent-admission-control.md) and [ADR-006](docs/adrs/006-oci-distribution.md).
+- **LLM claim extraction.** Only the `structural` extractor exists, so `cite_sources` under-detects on unstructured prose: it finds claims that assert a concrete value (a number, amount, date, or identifier) and nothing else. That also gates `from: claim_value` value bindings and the provenance downgrade that would make an invariant over an LLM-extracted value advisory ([ADR-002 §4](docs/adrs/002-episode-schema.md)).
+- **Policy bundles**: v0 takes `--contract FILE`, and custom clauses live in the contract rather than in bundle metadata. Git and OCI resolution, lockfiles, and signing are [ADR-001 §7](docs/adrs/001-agent-admission-control.md) and [ADR-006](docs/adrs/006-oci-distribution.md).
 - **WASM plugins** ([ADR-004](docs/adrs/004-wasm-plugin-abi.md)) and the **inline admission gate** ([ADR-005](docs/adrs/005-inline-admission-gate.md)).
 - `axda test`, `axda lint`, SARIF and JUnit reporters.
 - **`must_not` polarity inversion.** Every registered kind is a violation predicate and aliases carry the polarity (`expose_pii` → `content.no_pii`), so position sets severity defaults rather than inverting a clause ([ADR-003 §3](docs/adrs/003-contract-lowering.md)).
@@ -231,11 +231,11 @@ Embedding OPA and CUE costs real weight: the binary is ~47 MB and evaluation tak
 
 ## Design
 
-The architecture is settled in [docs/adrs](docs/adrs/summary.md) — read [the index](docs/adrs/summary.md) first; it lists six invariants later work may not quietly undo.
+The architecture is settled in [docs/adrs](docs/adrs/summary.md): read [the index](docs/adrs/summary.md) first; it lists six invariants later work may not quietly undo.
 
 | ADR | |
 |---|---|
-| [001](docs/adrs/001-agent-admission-control.md) | Agent Admission Control — out-of-band trace evaluation |
+| [001](docs/adrs/001-agent-admission-control.md) | Agent Admission Control: out-of-band trace evaluation |
 | [002](docs/adrs/002-episode-schema.md) | Episode schema v1 and OTLP attribute mapping |
 | [003](docs/adrs/003-contract-lowering.md) | Contract lowering specification |
 | [004](docs/adrs/004-wasm-plugin-abi.md) | WASM plugin ABI `axda/plugin/v1` |
@@ -251,9 +251,9 @@ go test ./...
 
 The suite asserts the three rules above directly rather than testing around them:
 
-- a clause that fails with content present reports `SKIP` — not `PASS` — when content is stripped, and an invariant whose operand never bound does the same
+- a clause that fails with content present reports `SKIP` (not `PASS`) when content is stripped, and an invariant whose operand never bound does the same
 - `cardinality: any` catches a bad value in *third* position, not just the first
-- ten runs over one trace produce byte-identical reports, and shuffling span order changes nothing — including through Rego, whose result sets have no inherent order
+- ten runs over one trace produce byte-identical reports, and shuffling span order changes nothing: including through Rego, whose result sets have no inherent order
 - a masked report does not contain the card number it reports on
 - an undeclared invariant operand, a missing `cardinality`, a non-namespaced custom clause, and a Rego module that does not compile all fail at **load**, before any trace is read
 

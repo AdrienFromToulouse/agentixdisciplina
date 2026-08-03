@@ -31,15 +31,15 @@ type Episode struct {
 }
 
 type Meta struct {
-	EpisodeID     string `json:"episode_id"`
-	TraceID       string `json:"trace_id"`
-	SchemaVersion string `json:"schema_version"`
-	RootAgent     string `json:"root_agent,omitempty"`
-	SessionID     string `json:"session_id,omitempty"`
-	Provider      string `json:"provider,omitempty"`
+	EpisodeID     string   `json:"episode_id"`
+	TraceID       string   `json:"trace_id"`
+	SchemaVersion string   `json:"schema_version"`
+	RootAgent     string   `json:"root_agent,omitempty"`
+	SessionID     string   `json:"session_id,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
 	Models        []string `json:"models,omitempty"`
-	StartedAt     int64  `json:"started_at_unix_nano"`
-	EndedAt       int64  `json:"ended_at_unix_nano"`
+	StartedAt     int64    `json:"started_at_unix_nano"`
+	EndedAt       int64    `json:"ended_at_unix_nano"`
 	// Adapter records how this Episode was produced: "otlp/v1.41",
 	// "cloudwatch-spans/v1", or "xray/v1" (ADR-007 §4).
 	Adapter string `json:"adapter"`
@@ -55,10 +55,10 @@ type SpanRef struct {
 }
 
 type Turn struct {
-	Index     int     `json:"index"`
-	Role      string  `json:"role"` // user | assistant | system | tool
-	AgentPath string  `json:"agent_path,omitempty"`
-	Text      string  `json:"text"`
+	Index     int    `json:"index"`
+	Role      string `json:"role"` // user | assistant | system | tool
+	AgentPath string `json:"agent_path,omitempty"`
+	Text      string `json:"text"`
 	// StartedAt is the start of the model call that produced this turn.
 	// Grounding needs it to decide which tool results were available when
 	// the turn was written.

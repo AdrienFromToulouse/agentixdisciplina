@@ -72,7 +72,7 @@ func TestCiteSourcesSupportedAndUnsupported(t *testing.T) {
 }
 
 // A tool call that completed *after* the turn was written cannot be its
-// source — otherwise a later call would retroactively ground an invention.
+// source: otherwise a later call would retroactively ground an invention.
 func TestGroundingIgnoresLaterToolCalls(t *testing.T) {
 	e := grounded("", "Your refund of 240 has been issued.")
 	e.ToolCalls = append(e.ToolCalls, episode.ToolCall{
@@ -88,7 +88,7 @@ func TestGroundingIgnoresLaterToolCalls(t *testing.T) {
 	}
 }
 
-// Sentences that assert no concrete value are not claims — otherwise every
+// Sentences that assert no concrete value are not claims: otherwise every
 // "Sure, let me look that up." would need a citation.
 func TestNonAssertiveSentencesAreNotClaims(t *testing.T) {
 	e := grounded(`{"ok":true}`, "I can help with that. Let me pull up your account.")
@@ -163,7 +163,7 @@ spec:
 	}
 }
 
-// Even opted into blocking, a probabilistic verdict cannot fail the build —
+// Even opted into blocking, a probabilistic verdict cannot fail the build:
 // Blocks() requires the deterministic class.
 func TestProbabilisticNeverBlocksOnSkip(t *testing.T) {
 	v := verdict.Verdict{

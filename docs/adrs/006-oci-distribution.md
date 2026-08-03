@@ -15,7 +15,7 @@ But git has three properties that become disqualifying once bundles are enforcin
 - **There is no signing story.** Git commit signatures attest that someone pushed a commit, not that a reviewed bundle was published. There is no standard way to say "only accept bundles published by our security team's CI".
 - **Air-gapped and mirrored environments are painful.** Getting a git dependency into a network-isolated environment means a manual clone-and-copy dance with no integrity checking at the boundary.
 
-Meanwhile [ADR-004 §5](004-wasm-plugin-abi.md) raised the stakes. Bundles can carry WASM plugins that request capabilities, and the trust prompt records acceptance against a bundle digest. The value of that record depends entirely on the digest being a trustworthy, immutable identity for reviewed content. Git gives us a commit SHA — content-addressed, but with no statement about who reviewed it or whether it was ever tested.
+Meanwhile [ADR-004 §5](004-wasm-plugin-abi.md) raised the stakes. Bundles can carry WASM plugins that request capabilities, and the trust prompt records acceptance against a bundle digest. The value of that record depends entirely on the digest being a trustworthy, immutable identity for reviewed content. Git gives us a commit SHA: content-addressed, but with no statement about who reviewed it or whether it was ever tested.
 
 Every organisation that would deploy this already runs a container registry with authentication, quotas, replication, garbage collection, and vulnerability scanning. OPA bundles, Helm charts, SBOMs, and model weights already ship as OCI artifacts. Building bespoke distribution infrastructure for policy bundles when that exists would be a mistake.
 
@@ -29,7 +29,7 @@ Every organisation that would deploy this already runs a container registry with
 --policy ./local-bundle                                     # file, unchanged
 ```
 
-Both remain first-class and permanently supported. Git is the on-ramp — clone, edit, push, run. OCI is the production path — signed, immutable, mirrorable. Forcing a registry publish before someone can try a policy they just wrote would be the wrong trade, which is why [ADR-001](001-agent-admission-control.md) sequenced them this way.
+Both remain first-class and permanently supported. Git is the on-ramp (clone, edit, push, run. OCI is the production path) signed, immutable, mirrorable. Forcing a registry publish before someone can try a policy they just wrote would be the wrong trade, which is why [ADR-001](001-agent-admission-control.md) sequenced them this way.
 
 The `Resolver` interface from [ADR-001 §7](001-agent-admission-control.md) is unchanged; this is a second implementation behind it.
 
@@ -59,7 +59,7 @@ manifest
 
 Two layout choices carry weight:
 
-**Plugins are separate layers with their own media type.** A registry then deduplicates a plugin shared across bundles, garbage-collects it independently, and — the operationally useful part — a security team can enumerate every `application/vnd.axda.plugin.v1+wasm` blob in the registry to inventory the WASM running against their traces. Tarring plugins into the bundle layer would make them invisible.
+**Plugins are separate layers with their own media type.** A registry then deduplicates a plugin shared across bundles, garbage-collects it independently, and (the operationally useful part) a security team can enumerate every `application/vnd.axda.plugin.v1+wasm` blob in the registry to inventory the WASM running against their traces. Tarring plugins into the bundle layer would make them invisible.
 
 **Capabilities and clause names are annotations.** Annotations are readable from the manifest without pulling any layer, so `axda policy inspect oci://…` can report "this bundle wants the `judge` capability" over a HEAD-sized request, before anything is downloaded. [ADR-004](004-wasm-plugin-abi.md)'s consent prompt is a lot more meaningful when the user can inspect before fetching rather than after.
 
@@ -67,9 +67,9 @@ The `git` resolver produces the same in-memory bundle from the same directory la
 
 ### 3. Signing with Sigstore, keyless by default
 
-Bundles are signed with cosign. Signatures are themselves OCI artifacts referencing the subject digest, discoverable through the referrers API — no separate signature infrastructure.
+Bundles are signed with cosign. Signatures are themselves OCI artifacts referencing the subject digest, discoverable through the referrers API: no separate signature infrastructure.
 
-Keyless (OIDC, ephemeral certificate, transparency log) is the default because the alternative is a long-lived private key that has to be stored, rotated, and revoked, and the realistic outcome of asking a team to do that is an unsigned bundle. Keyless binds the signature to a workload identity — a specific GitHub Actions workflow in a specific repository — which is a stronger and more useful claim than "someone had the key".
+Keyless (OIDC, ephemeral certificate, transparency log) is the default because the alternative is a long-lived private key that has to be stored, rotated, and revoked, and the realistic outcome of asking a team to do that is an unsigned bundle. Keyless binds the signature to a workload identity (a specific GitHub Actions workflow in a specific repository) which is a stronger and more useful claim than "someone had the key".
 
 Verification is policy, expressed in the consuming repo:
 
@@ -87,7 +87,7 @@ policies:
     certificate_oidc_issuer: https://token.actions.githubusercontent.com
 ```
 
-`require_signature: true` on a pattern makes an unsigned or mismatched bundle a **resolution failure** — exit `2`, before any trace is read. Verification failures are never warnings. A warning on a signature check is a check that gets ignored.
+`require_signature: true` on a pattern makes an unsigned or mismatched bundle a **resolution failure**, exit `2`, before any trace is read. Verification failures are never warnings. A warning on a signature check is a check that gets ignored.
 
 Key-based signing is supported for environments without OIDC.
 
@@ -107,7 +107,7 @@ policies:
     capabilities: [judge]
 ```
 
-`--frozen` fails if the resolved digest differs from the lock, so a re-tagged `v1.2.0` is a hard error rather than a silent policy change. The recorded signature identity is part of the lock, which means an attacker who compromises a *different* CI workflow in the same organisation and publishes a validly-signed bundle still fails verification — the identity moved.
+`--frozen` fails if the resolved digest differs from the lock, so a re-tagged `v1.2.0` is a hard error rather than a silent policy change. The recorded signature identity is part of the lock, which means an attacker who compromises a *different* CI workflow in the same organisation and publishes a validly-signed bundle still fails verification: the identity moved.
 
 ### 5. Signature, digest, and capability consent are one trust decision
 
@@ -181,7 +181,7 @@ The tarball is an OCI layout directory, so it is also consumable by `oras`, `cra
 
 - Bundles get immutable, content-addressed identity, so `axda.lock` pins an artifact rather than a mutable pointer.
 - Signature verification gives a real answer to "who published this policy", and keyless binds it to a workflow rather than to whoever holds a key.
-- Capability escalation cannot hide inside a version bump — it changes the digest and re-prompts.
+- Capability escalation cannot hide inside a version bump: it changes the digest and re-prompts.
 - Registries bring auth, replication, quotas, GC, and scanning that we would otherwise have to build or do without.
 - Separate plugin layers make WASM inventory a registry query, and let a security team see what is running.
 - Annotations make capability inspection possible before download, which is what makes consent informed.
@@ -192,7 +192,7 @@ The tarball is an OCI layout directory, so it is also consumable by `oras`, `cra
 
 - **A second resolver is a second code path** for auth, caching, error handling, and offline behaviour, and both must stay working. Accepted: git's zero-friction on-ramp is worth more than the maintenance cost of keeping it.
 - **Publishing friction is real.** `git push` versus build-push-sign is a meaningful difference in iteration speed, and it is exactly why git remains supported rather than deprecated.
-- **Sigstore is an external dependency** — a transparency log and an OIDC issuer that can be down or unreachable. Key-based signing is the fallback; offline verification of previously-verified digests works from the lock.
+- **Sigstore is an external dependency**: a transparency log and an OIDC issuer that can be down or unreachable. Key-based signing is the fallback; offline verification of previously-verified digests works from the lock.
 - **Keyless signing needs OIDC**, which excludes some CI systems and most laptops. Those environments use keys and inherit key management.
 - **Registries are not designed for tiny artifacts.** A 40 KiB bundle in infrastructure built for multi-gigabyte images works, but pull latency is dominated by round trips rather than bytes.
 - **`--skip-tests` exists**, so the §6 guarantee is a strong default rather than an invariant. Removing it would push people to hand-craft artifacts with `oras`, which is worse.
@@ -201,7 +201,7 @@ The tarball is an OCI layout directory, so it is also consumable by `oras`, `cra
 
 - A public bundle registry, index, or discovery service. This ADR specifies a format and a protocol, not a marketplace.
 - Bundle-to-bundle dependencies. Bundles are self-contained; composition is out of scope in [ADR-003](003-contract-lowering.md) too.
-- Encrypted bundles or confidential policy content — a policy readable by the tool is readable by its operator.
+- Encrypted bundles or confidential policy content: a policy readable by the tool is readable by its operator.
 - Vulnerability scanning of WASM plugin layers; the media type makes it possible, the scanners do not exist.
 - Automatic bundle updates or a renovate-style bot.
 - Delta or partial-layer pulls.
@@ -222,10 +222,10 @@ The tarball is an OCI layout directory, so it is also consumable by `oras`, `cra
 
 ## References
 
-- [ADR-001](001-agent-admission-control.md) — the `Resolver` interface, git resolution, `axda.lock`, the testdata requirement
-- [ADR-003](003-contract-lowering.md) — clause namespacing carried in annotations
-- [ADR-004](004-wasm-plugin-abi.md) — capability grants and the trust record this ADR binds to a digest and identity
-- [ORAS / OCI artifacts](https://oras.land/docs/concepts/artifact/) — `artifactType`, config blob, arbitrary layers
-- [Cosign: signing other types](https://docs.sigstore.dev/cosign/signing/other_types/) — signing non-image OCI artifacts
-- [OPA bundles as OCI images](https://github.com/open-policy-agent/opa/issues/1413) — prior art for policy-as-OCI media types
-- [SLSA provenance](https://slsa.dev/) — build attestation attached via the referrers API
+- [ADR-001](001-agent-admission-control.md): the `Resolver` interface, git resolution, `axda.lock`, the testdata requirement
+- [ADR-003](003-contract-lowering.md): clause namespacing carried in annotations
+- [ADR-004](004-wasm-plugin-abi.md): capability grants and the trust record this ADR binds to a digest and identity
+- [ORAS / OCI artifacts](https://oras.land/docs/concepts/artifact/): `artifactType`, config blob, arbitrary layers
+- [Cosign: signing other types](https://docs.sigstore.dev/cosign/signing/other_types/): signing non-image OCI artifacts
+- [OPA bundles as OCI images](https://github.com/open-policy-agent/opa/issues/1413): prior art for policy-as-OCI media types
+- [SLSA provenance](https://slsa.dev/): build attestation attached via the referrers API

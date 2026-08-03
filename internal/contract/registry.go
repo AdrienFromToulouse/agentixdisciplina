@@ -24,7 +24,7 @@ const (
 )
 
 // SkipError tells the runner a clause could not be evaluated. It exists so a
-// clause can decide *at runtime* that its inputs are absent — an invariant
+// clause can decide *at runtime* that its inputs are absent: an invariant
 // whose operand never appeared in the trace is skipped, never vacuously
 // passed (ADR-003 §4).
 type SkipError struct{ Reasons []string }
@@ -54,7 +54,7 @@ type EvalContext struct {
 // Every kind is a *violation predicate*: Eval returns what is wrong, and an
 // empty result is a pass. Aliases carry polarity (`expose_pii` resolves to
 // `content.no_pii`), so v0 does not implement the general must_not inversion
-// described in ADR-003 §3 — Positions guards nonsense placements instead.
+// described in ADR-003 §3: Positions guards nonsense placements instead.
 type Kind struct {
 	Name            string
 	Aliases         []string

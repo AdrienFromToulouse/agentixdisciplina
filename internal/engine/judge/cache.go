@@ -13,7 +13,7 @@ const DefaultCachePath = ".axda/judge-cache.json"
 //
 // A judge is non-deterministic, so re-running the same evaluation would
 // otherwise produce a different report each time and cost money each time.
-// Caching makes repeated runs over an unchanged trace stable in practice —
+// Caching makes repeated runs over an unchanged trace stable in practice:
 // it does not make judges deterministic, which is why they stay advisory.
 type Cache struct {
 	mu      sync.Mutex
@@ -65,8 +65,8 @@ func (c *Cache) Put(key string, v *Verdict) {
 	c.dirty = true
 }
 
-// Flush persists the cache. A write failure is not an evaluation failure —
-// the report is already correct — so the error is returned for logging only.
+// Flush persists the cache. A write failure is not an evaluation failure:
+// the report is already correct: so the error is returned for logging only.
 func (c *Cache) Flush() error {
 	if c == nil {
 		return nil

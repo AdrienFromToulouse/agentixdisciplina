@@ -1,7 +1,7 @@
 // Package judge implements the LLM judge (ADR-001 §6).
 //
-// Judges filter what the agent *said*: helpfulness, tone, groundedness —
-// questions that are irreducibly subjective. Their verdicts are probabilistic
+// Judges filter what the agent *said*: helpfulness, tone, and groundedness.
+// Those are irreducibly subjective. Their verdicts are probabilistic
 // and therefore advisory by default: an evaluation tool that turns CI red on a
 // rerun with no code change gets disabled within a month.
 //
@@ -177,7 +177,7 @@ func (j *Judge) Judge(ctx context.Context, req Request) (*Verdict, error) {
 		return nil, fmt.Errorf("judge %s: %w", j.cfg.Model, err)
 	}
 
-	// A refusal is a real outcome, not a crash — surface it rather than
+	// A refusal is a real outcome, not a crash: surface it rather than
 	// reading an empty content array.
 	if resp.StopReason == anthropic.StopReasonRefusal {
 		return nil, fmt.Errorf("judge declined to evaluate this episode (%s)", resp.StopDetails.Category)

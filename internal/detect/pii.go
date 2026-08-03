@@ -104,8 +104,8 @@ func Mask(m Match) string {
 
 // MaskAll replaces every detectable PII value in a free-text excerpt.
 //
-// Used where the excerpt is raw agent output rather than a specific match — a
-// claim, for instance — so a finding about something else does not carry a
+// Used where the excerpt is raw agent output rather than a specific match (a
+// claim, for instance), so a finding about something else does not carry a
 // card number out with it. It cannot catch what it cannot detect: an excerpt
 // is still model output, and `--evidence=none` is the lever for environments
 // where that is unacceptable.

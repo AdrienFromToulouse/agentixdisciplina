@@ -1,4 +1,4 @@
-# ADR-001: Agent Admission Control — Out-of-Band Trace Evaluation
+# ADR-001: Agent Admission Control (Out-of-Band Trace Evaluation)
 
 **Status:** Proposed
 **Date:** 2026-08-02
@@ -31,7 +31,7 @@ None of these can be expressed as an equality check on the output. All of them a
 
 The second failure is architectural. Frameworks increasingly ship in-process guardrails: callbacks, middleware, hooks, validators that run inside the agent's own event loop. This couples the checker to the checked, and every consequence of that coupling is bad:
 
-- an agent can be configured — or can drift — into skipping its own guard
+- an agent can be configured (or can drift) into skipping its own guard
 - the policy version is whatever the agent happened to deploy with, so tightening a rule requires a redeploy
 - you cannot evaluate an agent you do not own
 - you cannot evaluate a trace from last Tuesday
@@ -47,11 +47,11 @@ All of these answer the same question: **"may this call proceed?"**
 
 None of them answers: **"did this episode satisfy its contract?"**
 
-That second question is the one CI needs in order to gate a merge, and the one an incident review needs in order to explain what happened. It requires the whole trace, not a single call, and it requires more than one kind of check — a permission engine cannot tell you whether an answer was grounded, and an LLM judge cannot tell you whether a numeric invariant held.
+That second question is the one CI needs in order to gate a merge, and the one an incident review needs in order to explain what happened. It requires the whole trace, not a single call, and it requires more than one kind of check: a permission engine cannot tell you whether an answer was grounded, and an LLM judge cannot tell you whether a numeric invariant held.
 
 ### The substrate exists, and it is still moving
 
-OpenTelemetry's GenAI semantic conventions now define agent, workflow, tool, and model spans, along with token-usage and latency metrics. Client spans exited experimental in early 2026. But agent, workflow, and tool spans — precisely the ones this tool depends on — remain at Development stability, and the conventions were moved out of the main semantic-conventions repository into a dedicated project (`gen_ai.*` deprecated there as of v1.42.0, June 2026).
+OpenTelemetry's GenAI semantic conventions now define agent, workflow, tool, and model spans, along with token-usage and latency metrics. Client spans exited experimental in early 2026. But agent, workflow, and tool spans (precisely the ones this tool depends on) remain at Development stability, and the conventions were moved out of the main semantic-conventions repository into a dedicated project (`gen_ai.*` deprecated there as of v1.42.0, June 2026).
 
 So the substrate is real enough to build on and unstable enough that building directly against it would be a mistake. This tension drives Decision 2.
 
@@ -67,7 +67,7 @@ axda evaluate \
 
 The concept is **Agent Admission Control**: policy evaluation as an external control plane, with the agent as an unwitting subject.
 
-### 1. Out-of-band by construction — the agent stays ignorant
+### 1. Out-of-band by construction: the agent stays ignorant
 
 There is no SDK to install, no callback to register, no middleware to mount, no import statement anywhere in the agent. The sole coupling between `axda` and the agent is the trace the agent already emits for observability reasons it had anyway.
 
@@ -84,7 +84,7 @@ This is the load-bearing decision. Everything below is a consequence of it, and 
 
 ### 2. Input is a normalized `Episode`, decoded by a versioned adapter
 
-The canonical input is OTLP trace JSON — from a file (`--trace`), from stdin, or later from a span-export endpoint. But evaluators never see raw spans. The adapter decodes a trace into an **Episode**:
+The canonical input is OTLP trace JSON: from a file (`--trace`), from stdin, or later from a span-export endpoint. But evaluators never see raw spans. The adapter decodes a trace into an **Episode**:
 
 ```
 Episode
@@ -99,7 +99,7 @@ Episode
 
 The schema is versioned (`episode/v1`) and every bundle declares the version it targets, so an adapter change is a detectable, resolvable incompatibility rather than a silent misread.
 
-Non-OTLP inputs — framework-native JSON exports — are additional adapters behind the same interface. They are never a second path into the core.
+Non-OTLP inputs (framework-native JSON exports) are additional adapters behind the same interface. They are never a second path into the core.
 
 ### 3. The contract is the authoring surface; evaluators are the compilation target
 
@@ -163,7 +163,7 @@ evaluators:
 | **LLM judge** | what the agent **said** | Was this useful? |
 | **metric** | what the agent **cost** | Was this within budget? |
 
-CUE is chosen for the belief layer specifically because unification is the right primitive for consistency: you are asking whether a set of extracted values can coexist with a schema and with each other, not writing imperative assertions one at a time. Rego is chosen for the action layer because permission-over-a-log is exactly the question OPA was built for — the only novelty is that the input is an episode rather than a single request. The judge exists because helpfulness is irreducibly subjective and pretending otherwise produces bad rules rather than no rules. `metric` is a built-in threshold checker rather than a real engine.
+CUE is chosen for the belief layer specifically because unification is the right primitive for consistency: you are asking whether a set of extracted values can coexist with a schema and with each other, not writing imperative assertions one at a time. Rego is chosen for the action layer because permission-over-a-log is exactly the question OPA was built for: the only novelty is that the input is an episode rather than a single request. The judge exists because helpfulness is irreducibly subjective and pretending otherwise produces bad rules rather than no rules. `metric` is a built-in threshold checker rather than a real engine.
 
 This split is not taxonomy for its own sake. It sorts verdicts by **how much they may be trusted**, which Decision 6 then consumes directly.
 
@@ -173,26 +173,26 @@ This split is not taxonomy for its own sake. It sorts verdicts by **how much the
 
 Third-party evaluators are **WASM modules executed via wazero** (a pure-Go runtime, which preserves both of those properties).
 
-**Why WASM over the alternatives.** An evaluator is a pure function `Episode → []Verdict`, so it does not need the ambient authority that a subprocess model hands out for free. That matters here more than it usually does, because the whole point of `--policy github.com/some-org/evals` is that you run policy bundles **authored by other people**. A bundle is a distributable artifact pulled over the network and then handed your production trace — which contains, by construction, everything your agent said and every argument it passed to every tool.
+**Why WASM over the alternatives.** An evaluator is a pure function `Episode → []Verdict`, so it does not need the ambient authority that a subprocess model hands out for free. That matters here more than it usually does, because the whole point of `--policy github.com/some-org/evals` is that you run policy bundles **authored by other people**. A bundle is a distributable artifact pulled over the network and then handed your production trace, which contains, by construction, everything your agent said and every argument it passed to every tool.
 
 Under wazero, a module gets no filesystem, no clock, no network, and no environment unless the host explicitly grants a capability. A hostile bundle therefore cannot exfiltrate the trace it was invited to inspect. The Terraform-style gRPC-subprocess model and the exec-a-binary model both give that away by default. Deterministic replay falls out of the same property for free.
 
 ABI `axda/plugin/v1`: the guest exports `evaluate`; the host passes a length-prefixed protobuf `Episode` and reads back `[]Verdict`. Capabilities (`http`, `judge`, `read_file`) are declared in bundle metadata and granted per-evaluator. A plugin that wants to run its own LLM judge requests `judge` and calls back into the host's configured provider rather than opening a socket of its own.
 
-**The cost, stated plainly:** plugin authors need a WASM toolchain — TinyGo, Rust, or Go 1.24+ with `GOOS=wasip1`. This is a real barrier. It is accepted because the built-in engines cover the common cases, making third-party WASM the extension path rather than the default path.
+**The cost, stated plainly:** plugin authors need a WASM toolchain, TinyGo, Rust, or Go 1.24+ with `GOOS=wasip1`. This is a real barrier. It is accepted because the built-in engines cover the common cases, making third-party WASM the extension path rather than the default path.
 
-### 6. Verdicts are tiered — only deterministic ones fail the build
+### 6. Verdicts are tiered: only deterministic ones fail the build
 
 Every verdict carries a class:
 
-- **`deterministic`** — CUE, Rego, metric. Same episode plus same bundle yields the same verdict, always. **Blocking.**
-- **`probabilistic`** — LLM judge. **Advisory by default**; blocks only when the clause explicitly sets `blocking: true`.
+- **`deterministic`**: CUE, Rego, metric. Same episode plus same bundle yields the same verdict, always. **Blocking.**
+- **`probabilistic`**: LLM judge. **Advisory by default**; blocks only when the clause explicitly sets `blocking: true`.
 
 The reasoning is operational rather than philosophical. An evaluation tool that turns CI red on a rerun with no code change gets disabled within a month, and then the org has a policy bundle nobody enforces. Determinism is the property that makes this gateable at all, so the default must protect it.
 
 Advisory does not mean unactionable. Judge verdicts carry `model_id`, `prompt_hash`, `effort`, and the judge's own reasoning as evidence, so a failing quality signal can be reviewed and, if it proves stable, promoted to blocking.
 
-> **Correction (2026-08-03).** This section originally named `temperature` as the recorded provenance field. That parameter is rejected outright by current frontier models — `temperature`, `top_p`, and `top_k` return a 400 on Claude Opus 5 — so there is no temperature to record. The reproducibility knob is `output_config.effort`, and that is what the implementation stores. Verdicts are additionally cached by `(model, effort, prompt hash)`, which is what makes repeated runs over an unchanged trace stable in practice without pretending a judge is deterministic.
+> **Correction (2026-08-03).** This section originally named `temperature` as the recorded provenance field. That parameter is rejected outright by current frontier models (`temperature`, `top_p`, and `top_k` return a 400 on Claude Opus 5) so there is no temperature to record. The reproducibility knob is `output_config.effort`, and that is what the implementation stores. Verdicts are additionally cached by `(model, effort, prompt hash)`, which is what makes repeated runs over an unchanged trace stable in practice without pretending a judge is deterministic.
 
 Report schema `axda.dev/report/v1`:
 
@@ -218,7 +218,7 @@ Report schema `axda.dev/report/v1`:
 }
 ```
 
-Exit codes: `0` pass, `1` blocking violation, `2` bundle or trace error. Reporters: `human` (default), `json`, `sarif` — which lands violations in GitHub code scanning with no extra integration work — and `junit`.
+Exit codes: `0` pass, `1` blocking violation, `2` bundle or trace error. Reporters: `human` (default), `json`, `sarif` (which lands violations in GitHub code scanning with no extra integration work), and `junit`.
 
 **Every violation must point at a span.** A finding without evidence is not shippable output; it is a vibe with a severity label attached, and it is the reason eval scores get ignored.
 
@@ -230,7 +230,7 @@ Resolution goes through a `Resolver` interface. v1 ships two implementations: `f
 --policy github.com/company/support-agent-evals@v1.2.0
 ```
 
-Git is chosen over an OCI registry for v1 because it reuses the user's existing SSH keys and tokens, which means private bundles work immediately with no new infrastructure and no publishing step standing between someone and their first run. OCI — with its stronger supply-chain story of immutable digests and cosign signatures — is a later implementation of the same interface, not a rewrite.
+Git is chosen over an OCI registry for v1 because it reuses the user's existing SSH keys and tokens, which means private bundles work immediately with no new infrastructure and no publishing step standing between someone and their first run. OCI (with its stronger supply-chain story of immutable digests and cosign signatures) is a later implementation of the same interface, not a rewrite.
 
 Resolved bundles are content-hashed into `axda.lock`. `--frozen` fails when the lock is stale, so CI is reproducible or it errors.
 
@@ -285,25 +285,25 @@ The trust boundary is the point of the diagram. Everything above it is the agent
 - Agents you did not write, in languages you do not use, are evaluable from their traces alone.
 - Deterministic-by-default verdicts make the tool safe to put in a merge gate, which is the only place it will actually change behavior.
 - Every violation is anchored to a span, so a failure is a starting point for debugging rather than a score to argue with.
-- One artifact serves CI gating, nightly regression, incident review, and — later — an inline admission gate.
+- One artifact serves CI gating, nightly regression, incident review, and (later) an inline admission gate.
 - The three-engine split gives each question to the tool that can actually answer it, instead of forcing permissions into a judge prompt or quality into a Rego rule.
 
 ### Trade-offs
 
-- **Trace quality is a hard dependency, and this is the largest adoption risk.** `axda` can only assert what the trace recorded; an agent that does not emit tool spans cannot be checked for tool-allowlist violations. Mitigation: `axda lint --trace` reports which contract clauses are unevaluable against a given trace's coverage, and unevaluable clauses report **`skipped`, never `passed`**. Silently passing a clause we could not evaluate would be the single worst failure mode available to this tool — it would hand someone a green check that verifies nothing and tell them they were safe.
+- **Trace quality is a hard dependency, and this is the largest adoption risk.** `axda` can only assert what the trace recorded; an agent that does not emit tool spans cannot be checked for tool-allowlist violations. Mitigation: `axda lint --trace` reports which contract clauses are unevaluable against a given trace's coverage, and unevaluable clauses report **`skipped`, never `passed`**. Silently passing a clause we could not evaluate would be the single worst failure mode available to this tool: it would hand someone a green check that verifies nothing and tell them they were safe.
 - **Post-hoc means the damage already happened.** v1 detects, it does not prevent. Inline admission is deferred (ADR-005), not denied, and Decision 7's bundle format is designed so the same artifact drives both.
 - **Semantic-convention churn lands on us.** The adapter absorbs it on users' behalf, but that means the adapter is a maintenance commitment that tracks a Development-stability spec.
-- **A single `reliability_score` invites vanity-metric use** — the number will end up on a dashboard and someone will optimize it. Mitigation: the score is never the gate. The gate is the violation list; the score is a summary of it.
+- **A single `reliability_score` invites vanity-metric use**: the number will end up on a dashboard and someone will optimize it. Mitigation: the score is never the gate. The gate is the violation list; the score is a summary of it.
 - **Three languages in one tool** (CUE, Rego, judge prompts) is a real learning cost. The contract layer hides it for the common cases; the escape hatch does not, and anyone who needs the escape hatch pays the full price.
 - **WASM raises the floor for plugin authors** relative to "write a script that reads stdin". Accepted in exchange for being able to run strangers' policy bundles against production traces.
 
 ### Out of scope (v1)
 
-- Inline or blocking admission at runtime — [ADR-005](005-inline-admission-gate.md).
-- Trace **collection**. `axda` consumes traces; it is not a collector, an exporter, or a backend. Getting a trace out of a specific runtime is a configuration problem, documented per host — [ADR-007](007-agentcore-trace-acquisition.md) covers AWS Bedrock AgentCore.
+- Inline or blocking admission at runtime: [ADR-005](005-inline-admission-gate.md).
+- Trace **collection**. `axda` consumes traces; it is not a collector, an exporter, or a backend. Getting a trace out of a specific runtime is a configuration problem, documented per host: [ADR-007](007-agentcore-trace-acquisition.md) covers AWS Bedrock AgentCore.
 - Fleet aggregation, trend dashboards, and cross-episode statistics.
 - Auto-remediation or prompt-repair suggestions.
-- OCI bundle distribution — [ADR-006](006-oci-distribution.md).
+- OCI bundle distribution: [ADR-006](006-oci-distribution.md).
 - Adapters beyond OTLP plus one reference framework adapter.
 
 ## Verification
@@ -322,24 +322,24 @@ These are the acceptance criteria for the implementation that follows this ADR:
 
 | ADR | Scope |
 |---|---|
-| [002](002-episode-schema.md) | Episode schema v1 — field-level specification and OTLP attribute mapping |
-| [003](003-contract-lowering.md) | Contract lowering specification — the full clause vocabulary and its compilation |
-| [004](004-wasm-plugin-abi.md) | WASM plugin ABI `axda/plugin/v1` — memory layout, capability grants, versioning |
-| [005](005-inline-admission-gate.md) | Inline admission gate — partial-episode semantics, latency budget, fail-open policy |
+| [002](002-episode-schema.md) | Episode schema v1: field-level specification and OTLP attribute mapping |
+| [003](003-contract-lowering.md) | Contract lowering specification: the full clause vocabulary and its compilation |
+| [004](004-wasm-plugin-abi.md) | WASM plugin ABI `axda/plugin/v1`: memory layout, capability grants, versioning |
+| [005](005-inline-admission-gate.md) | Inline admission gate: partial-episode semantics, latency budget, fail-open policy |
 | [006](006-oci-distribution.md) | OCI bundle distribution and signing |
 | [007](007-agentcore-trace-acquisition.md) | Trace acquisition from AWS Bedrock AgentCore Runtime |
 
 ## Open items
 
-- ~~**Go module path.**~~ **Resolved.** The repository's canonical name is lowercase (`AdrienFromToulouse/agentixdisciplina`), so the module path is `github.com/AdrienFromToulouse/agentixdisciplina`. This was not a design choice in the end — a mixed-case path would simply not have matched the repository, and `go get` would have failed. A vanity path such as `axda.dev/axda` remains available and would still need settling before the first tag, since the module path is effectively permanent afterwards.
-- **License.** Apache-2.0 is the assumed default for an OSS policy tool with a plugin ecosystem — it grants a patent license that MIT does not, which matters when third parties are distributing bundles and modules. Not yet decided.
+- ~~**Go module path.**~~ **Resolved.** The repository's canonical name is lowercase (`AdrienFromToulouse/agentixdisciplina`), so the module path is `github.com/AdrienFromToulouse/agentixdisciplina`. This was not a design choice in the end: a mixed-case path would simply not have matched the repository, and `go get` would have failed. A vanity path such as `axda.dev/axda` remains available and would still need settling before the first tag, since the module path is effectively permanent afterwards.
+- **License.** Apache-2.0 is the assumed default for an OSS policy tool with a plugin ecosystem: it grants a patent license that MIT does not, which matters when third parties are distributing bundles and modules. Not yet decided.
 
 ## References
 
-- [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — agent, workflow, tool, and model spans; `gen_ai.*` moved out of the main semconv repo in v1.42.0 (June 2026), agent-layer spans still at Development stability
-- [Open Policy Agent / Rego](https://www.openpolicyagent.org/) — action-layer engine
-- [CUE](https://cuelang.org/) — belief-layer engine
-- [wazero](https://wazero.io/) — pure-Go WebAssembly runtime, plugin sandbox
-- [TrueFoundry OPA Guardrails](https://www.truefoundry.com/docs/ai-gateway/opa-guardrails) — prior art, inline per-call gating
-- [Why OPA is the missing guardrail for AI agents](https://codilime.com/blog/why-use-open-policy-agent-for-your-ai-agents/) — prior art, gateway-embedded policy
-- [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) — violation reporting format for code-scanning integration
+- [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/): agent, workflow, tool, and model spans; `gen_ai.*` moved out of the main semconv repo in v1.42.0 (June 2026), agent-layer spans still at Development stability
+- [Open Policy Agent / Rego](https://www.openpolicyagent.org/): action-layer engine
+- [CUE](https://cuelang.org/): belief-layer engine
+- [wazero](https://wazero.io/): pure-Go WebAssembly runtime, plugin sandbox
+- [TrueFoundry OPA Guardrails](https://www.truefoundry.com/docs/ai-gateway/opa-guardrails): prior art, inline per-call gating
+- [Why OPA is the missing guardrail for AI agents](https://codilime.com/blog/why-use-open-policy-agent-for-your-ai-agents/): prior art, gateway-embedded policy
+- [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html): violation reporting format for code-scanning integration

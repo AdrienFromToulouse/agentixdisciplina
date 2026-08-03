@@ -3,8 +3,8 @@ package axda.order
 
 import data.axda.match
 
-# "Verify identity before refunding" cannot be *satisfied* on a prefix — the
-# agent might verify later — but it can be *violated*, exactly when the action
+# "Verify identity before refunding" cannot be *satisfied* on a prefix: the
+# agent might verify later, but it can be *violated*, exactly when the action
 # fires with no completed precondition behind it. That asymmetry is what makes
 # this enforceable inline (ADR-005 §2).
 requires_precondition_violation contains v if {

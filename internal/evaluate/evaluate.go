@@ -54,7 +54,7 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 	}
 
 	// Claims are inferred, not read, so they are extracted here rather than
-	// by the adapter — and the structural extractor is deterministic, which
+	// by the adapter, and the structural extractor is deterministic, which
 	// is what lets grounding clauses block (ADR-002 §4).
 	if len(ep.Claims) == 0 {
 		ep.Claims = extract.Structural(ep)

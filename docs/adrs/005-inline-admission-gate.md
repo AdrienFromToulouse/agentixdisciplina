@@ -9,9 +9,9 @@
 
 [ADR-001](001-agent-admission-control.md) scoped v1 to post-hoc evaluation and named the obvious limitation in its trade-offs: *post-hoc means the damage already happened*. A CI gate stops a bad agent from shipping. It does not stop a shipped agent from issuing a refund above the approved limit at 3am.
 
-The name of the concept is Agent Admission Control, and admission control is inherently inline. This ADR specifies the inline gate — deferred from v1, not abandoned.
+The name of the concept is Agent Admission Control, and admission control is inherently inline. This ADR specifies the inline gate: deferred from v1, not abandoned.
 
-The design constraint that makes this hard is that [ADR-001](001-agent-admission-control.md) also promised **the same artifact drives both**. An inline gate with its own policy language would mean two sources of truth that drift, and the drift would be silent until an incident. So the gate must consume the same bundle, the same contract, and the same clause registry — while operating on information that does not yet exist.
+The design constraint that makes this hard is that [ADR-001](001-agent-admission-control.md) also promised **the same artifact drives both**. An inline gate with its own policy language would mean two sources of truth that drift, and the drift would be silent until an incident. So the gate must consume the same bundle, the same contract, and the same clause registry: while operating on information that does not yet exist.
 
 Three problems follow:
 
@@ -23,11 +23,11 @@ Three problems follow:
 
 ### 1. The gate is a tool-call proxy, not an SDK
 
-The gate runs as a process between the agent and its tools — an MCP proxy for MCP-based agents, an HTTP forward proxy for direct tool APIs. The agent's tool endpoint URL changes. Nothing else about the agent changes.
+The gate runs as a process between the agent and its tools: an MCP proxy for MCP-based agents, an HTTP forward proxy for direct tool APIs. The agent's tool endpoint URL changes. Nothing else about the agent changes.
 
 This preserves [ADR-001](001-agent-admission-control.md)'s load-bearing property under inline enforcement. A gate delivered as a framework callback would put the checker back inside the checked, and every consequence [ADR-001](001-agent-admission-control.md) enumerated would return: skippable by configuration, versioned with the agent, unavailable for agents you did not write.
 
-A proxy keeps the agent ignorant. It also keeps the enforcement point at the only place where blocking is actually meaningful — the network hop where the side effect would occur. The agent never learns whether it was evaluated; it learns that a tool call returned an error.
+A proxy keeps the agent ignorant. It also keeps the enforcement point at the only place where blocking is actually meaningful: the network hop where the side effect would occur. The agent never learns whether it was evaluated; it learns that a tool call returned an error.
 
 ```
 agent ──► axda gate ──► tool / MCP server
@@ -53,9 +53,9 @@ The distinction that matters is not clause-by-clause taste, it is **which direct
 | `grounding.cite_sources` | cannot be violated until the agent stops talking | no |
 | `quality.*` | judges are banned inline (§3) | no |
 
-`order.requires_precondition` is the interesting case. "Verify identity before refunding" cannot be *satisfied* on a prefix — the agent might verify later. But it can be *violated* on a prefix, precisely at the moment `billing.refund` is attempted with no prior `crm.verify_identity`. The gate evaluates the violating direction only. This is the shape of most useful safety rules, and it is why the gate is worth building despite being unable to evaluate positive obligations.
+`order.requires_precondition` is the interesting case. "Verify identity before refunding" cannot be *satisfied* on a prefix: the agent might verify later. But it can be *violated* on a prefix, precisely at the moment `billing.refund` is attempted with no prior `crm.verify_identity`. The gate evaluates the violating direction only. This is the shape of most useful safety rules, and it is why the gate is worth building despite being unable to evaluate positive obligations.
 
-Invariants are conditional: if `approved_limit` comes from a `crm.lookup` that has already returned, the constraint is decidable when `billing.refund` is attempted. If the lookup has not happened, the operand is unbound and the clause is `skipped` inline — and, per [ADR-003 §5](003-contract-lowering.md), skipped is not passed, so it is still enforced post-hoc.
+Invariants are conditional: if `approved_limit` comes from a `crm.lookup` that has already returned, the constraint is decidable when `billing.refund` is attempted. If the lookup has not happened, the operand is unbound and the clause is `skipped` inline, and per [ADR-003 §5](003-contract-lowering.md), skipped is not passed, so it is still enforced post-hoc.
 
 **The gate is strictly weaker than the post-hoc run and never replaces it.** `axda explain --mode inline` prints which clauses are enforceable inline and which are deferred, so the coverage gap is visible at authoring time rather than discovered after an incident.
 
@@ -65,8 +65,8 @@ Default budget is **50ms** per tool call, wall-clock, from proxy ingress to deci
 
 - Rego and CUE evaluate against a prefix Episode in well under that on realistic episode sizes.
 - The metric evaluator is arithmetic.
-- WASM plugins get a tighter deadline than the post-hoc 2s ([ADR-004 §6](004-wasm-plugin-abi.md)) — default 10ms — and a plugin that cannot make it is excluded from inline enforcement at bundle load, with a warning, rather than being allowed to blow the budget at runtime.
-- **LLM judges are prohibited inline**, unconditionally. Not budget-limited — prohibited. A judge is a network round-trip to a model, which is at minimum hundreds of milliseconds, and it is probabilistic, which means it would block a legitimate action nondeterministically. Both properties are disqualifying, and making it a tunable would invite someone to turn it on.
+- WASM plugins get a tighter deadline than the post-hoc 2s ([ADR-004 §6](004-wasm-plugin-abi.md)) (default 10ms) and a plugin that cannot make it is excluded from inline enforcement at bundle load, with a warning, rather than being allowed to blow the budget at runtime.
+- **LLM judges are prohibited inline**, unconditionally. Not budget-limited: prohibited. A judge is a network round-trip to a model, which is at minimum hundreds of milliseconds, and it is probabilistic, which means it would block a legitimate action nondeterministically. Both properties are disqualifying, and making it a tunable would invite someone to turn it on.
 
 Exceeding the budget is an error condition and resolves through §4, not by waiting.
 
@@ -87,19 +87,19 @@ must_not:
 |---|---|
 | critical | `deny` |
 | major, minor | `allow` |
-| any probabilistic clause | n/a — not evaluated inline |
+| any probabilistic clause | n/a: not evaluated inline |
 
 The reasoning: for a critical `must_not`, the whole point is that the action is unacceptable, so an unevaluated critical rule must not become an allowed action. For everything else, an agent that stops working because the gate had a bad minute is a worse outcome than a budget overrun.
 
 Three further protections, because per-clause defaults are not enough on their own:
 
-- **Circuit breaker.** If the gate's error rate over a rolling window exceeds a threshold, it trips and applies `on_error` uniformly without evaluating — so a sick gate degrades predictably instead of adding latency to every call on its way to the same answer.
+- **Circuit breaker.** If the gate's error rate over a rolling window exceeds a threshold, it trips and applies `on_error` uniformly without evaluating: so a sick gate degrades predictably instead of adding latency to every call on its way to the same answer.
 - **Kill switch.** `axda gate --disable` and an equivalent control-plane flag put the proxy into pass-through. Operators need a documented way to get out of the way at 3am, and if we do not provide one they will delete the deployment.
 - **Fail-open is loud.** Every allowed-on-error decision emits a span and a counter. Silent fail-open is how a gate becomes decorative without anyone noticing.
 
 ### 5. Decisions are cached and idempotent
 
-Identical `(bundle digest, plan hash, clause, tool name, canonicalized arguments, relevant prefix state)` yields a cached decision. Retries — which agents do constantly — do not re-evaluate.
+Identical `(bundle digest, plan hash, clause, tool name, canonicalized arguments, relevant prefix state)` yields a cached decision. Retries (which agents do constantly) do not re-evaluate.
 
 The cache key includes the plan hash from [ADR-003 §6](003-contract-lowering.md), so a contract change invalidates every entry rather than serving decisions from a policy that is no longer in force.
 
@@ -107,7 +107,7 @@ The cache key includes the plan hash from [ADR-003 §6](003-contract-lowering.md
 
 Every gate decision emits its own span: clause, verdict, latency, cache hit, and whether it was an `on_error` fallback. Those spans land in the same trace the agent is already producing, which means the post-hoc run ([ADR-001](001-agent-admission-control.md)) reads them as ordinary Episode content.
 
-Two things fall out. Post-hoc evaluation can assert on the gate itself — "no critical clause fell open this week" is a contract clause like any other. And an incident review sees the enforcement decisions in the same timeline as the agent behaviour, rather than in a separate system that has to be correlated by hand.
+Two things fall out. Post-hoc evaluation can assert on the gate itself: "no critical clause fell open this week" is a contract clause like any other. And an incident review sees the enforcement decisions in the same timeline as the agent behaviour, rather than in a separate system that has to be correlated by hand.
 
 ### 7. Contract selection is by session, not by agent identity
 
@@ -150,10 +150,10 @@ An unmapped session with no default configured is a **configuration error that d
 ### Benefits
 
 - Violations are prevented rather than reported, for the clause shapes where prevention is possible.
-- One bundle, one contract, one registry across CI and runtime — no second policy language, no drift.
+- One bundle, one contract, one registry across CI and runtime: no second policy language, no drift.
 - The agent stays ignorant: a URL change, no SDK, no callback, no redeploy when policy changes.
 - Denials arrive as tool errors, so agents degrade gracefully instead of crashing.
-- `order.requires_precondition` being violation-decidable on a prefix means the most valuable safety rules — "never do X without first doing Y" — work inline despite being unsatisfiable on a prefix.
+- `order.requires_precondition` being violation-decidable on a prefix means the most valuable safety rules ("never do X without first doing Y") work inline despite being unsatisfiable on a prefix.
 - Per-clause `on_error` avoids the all-or-nothing webhook trap; the circuit breaker and kill switch give operators a way out.
 - Gate spans make enforcement auditable by the same tool that evaluates the agent, and make "the gate fell open" itself assertable.
 
@@ -171,7 +171,7 @@ An unmapped session with no default configured is a **configuration error that d
 - **Gating model output.** Tokens that have streamed cannot be recalled, and buffering the full response to evaluate it destroys the streaming UX that agent products depend on. A response-path hook is a separate decision with a genuinely different cost/benefit, not an extension of this one.
 - LLM judges inline, in any configuration.
 - Human-in-the-loop escalation on denial (deny is automatic and final; approval workflows are a different product).
-- Automatic remediation or argument rewriting — the gate allows or denies, it does not edit the agent's calls.
+- Automatic remediation or argument rewriting: the gate allows or denies, it does not edit the agent's calls.
 - Cross-session or fleet-level rate limiting.
 - Multi-tenant gate deployment and per-tenant contract isolation.
 
@@ -190,8 +190,8 @@ An unmapped session with no default configured is a **configuration error that d
 
 ## References
 
-- [ADR-001](001-agent-admission-control.md) — Agent Admission Control; the deferred inline gate
-- [ADR-002](002-episode-schema.md) — Episode schema; `sealed` and incremental construction
-- [ADR-003](003-contract-lowering.md) — `prefix_decidable`, severity defaults, plan hash
-- [ADR-004](004-wasm-plugin-abi.md) — plugin deadlines and capability-derived class
-- [Kubernetes admission webhook failure policy](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#failure-policy) — the prior art for §4
+- [ADR-001](001-agent-admission-control.md): Agent Admission Control; the deferred inline gate
+- [ADR-002](002-episode-schema.md): Episode schema; `sealed` and incremental construction
+- [ADR-003](003-contract-lowering.md): `prefix_decidable`, severity defaults, plan hash
+- [ADR-004](004-wasm-plugin-abi.md): plugin deadlines and capability-derived class
+- [Kubernetes admission webhook failure policy](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#failure-policy): the prior art for §4
