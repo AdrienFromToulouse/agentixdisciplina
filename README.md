@@ -163,9 +163,11 @@ Or in one step:
 | Adapters | `otlp/v1.41` (file or stdin), `cloudwatch-spans/v1` (`aws/spans`) |
 | Trace fetch | CloudWatch by session id or trace id, with settle-polling and `--raw` |
 | **Rego** clauses | `tool.allowlist` · `tool.denylist` · `tool.call_limit` · `order.requires_precondition` · `order.before` |
-| **CUE** clauses | `invariants` with declared value bindings · `tool.args_match` schema unification |
-| builtin clauses | `content.no_pii` (Luhn-checked) · `content.deny_patterns` |
+| **CUE** clauses | `invariants` with declared value bindings · `tool.args_match` · `grounding.cite_sources` |
+| **judge** clauses | `quality.judge` · `quality.helpful` · `quality.on_topic` · `quality.tone` · `grounding.judge` — advisory, cached |
+| builtin clauses | `content.no_pii` (Luhn-checked) · `content.deny_patterns` · `grounding.no_unsourced_claims` |
 | metric clauses | `budget.max_{duration_ms,steps,tokens,tool_errors}` |
+| Claim extraction | structural and deterministic — a sentence asserting a concrete value, grounded against tool results that completed *before* the turn |
 | Value bindings | `from: tool_call \| tool_result \| metric \| literal`, JSONPath-lite, `cardinality: any \| first \| last \| exactly_one`, `default` |
 | Custom clauses | namespaced Rego declared in the contract, compiled and checked at load |
 | Coverage | `SKIP` with remediation hints; `--fail-on-skipped` to gate on instrumentation |
@@ -191,12 +193,34 @@ spec:
 
 A policy that does not compile is a **load-time** error, not a mid-run surprise. Custom findings carry span evidence like any built-in.
 
+### LLM judges
+
+Judges filter what the agent *said* — helpfulness, tone, groundedness. They are **advisory**: a judge verdict never fails the build unless the clause sets `blocking: true`, and because `Blocks()` requires the deterministic class, even that cannot make a probabilistic verdict gate.
+
+```yaml
+  must:
+    - kind: quality.judge
+      rubric_file: judges/politeness.md    # inlined at load; a missing file fails there
+    - kind: quality.tone
+      style: warm but concise
+```
+
+```bash
+export ANTHROPIC_API_KEY=...
+./axda evaluate -c agent.yaml -t trace.json          # judges run
+./axda evaluate -c agent.yaml -t trace.json --no-judge
+./axda evaluate -c agent.yaml -t trace.json --judge-model claude-opus-5 --judge-effort medium
+```
+
+With no credentials, judge clauses report `SKIP` with the reason — never `PASS`. Verdicts carry `model_id`, `prompt_hash`, and `effort` as provenance, and are cached in `.axda/judge-cache.json` keyed by all three, so re-running over an unchanged trace is stable and free. Caching does not make a judge deterministic — which is exactly why they stay advisory.
+
+Default model is `claude-opus-5` at `effort: low`, since scoring a transcript against a rubric is a scoped classification task. Both are per-run flags.
+
 ## Not built yet
 
 Specified in the ADRs, absent from the binary:
 
-- **Grounding clauses** (`cite_sources`, `no_unsourced_claims`) — needs claim extraction ([ADR-002 §4](docs/adrs/002-episode-schema.md)). That also gates `from: claim_value` bindings and the provenance downgrade that would make an invariant over an LLM-extracted value advisory.
-- **LLM judges** ([ADR-001 §6](docs/adrs/001-agent-admission-control.md)).
+- **LLM claim extraction.** Only the `structural` extractor exists, so `cite_sources` under-detects on unstructured prose — it finds claims that assert a concrete value (a number, amount, date, or identifier) and nothing else. That also gates `from: claim_value` value bindings and the provenance downgrade that would make an invariant over an LLM-extracted value advisory ([ADR-002 §4](docs/adrs/002-episode-schema.md)).
 - **Policy bundles** — v0 takes `--contract FILE`, and custom clauses live in the contract rather than in bundle metadata. Git and OCI resolution, lockfiles, and signing are [ADR-001 §7](docs/adrs/001-agent-admission-control.md) and [ADR-006](docs/adrs/006-oci-distribution.md).
 - **WASM plugins** ([ADR-004](docs/adrs/004-wasm-plugin-abi.md)) and the **inline admission gate** ([ADR-005](docs/adrs/005-inline-admission-gate.md)).
 - `axda test`, `axda lint`, SARIF and JUnit reporters.

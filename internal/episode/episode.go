@@ -59,6 +59,10 @@ type Turn struct {
 	Role      string  `json:"role"` // user | assistant | system | tool
 	AgentPath string  `json:"agent_path,omitempty"`
 	Text      string  `json:"text"`
+	// StartedAt is the start of the model call that produced this turn.
+	// Grounding needs it to decide which tool results were available when
+	// the turn was written.
+	StartedAt int64   `json:"started_at_unix_nano"`
 	Span      SpanRef `json:"span"`
 	// Captured is false when the span existed but its content was not
 	// recorded (GenAI content capture is opt-in; ADR-002 §1).

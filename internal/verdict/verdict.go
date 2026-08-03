@@ -59,6 +59,10 @@ type Verdict struct {
 	Message         string    `json:"message,omitempty"`
 	Findings        []Finding `json:"findings,omitempty"`
 	MissingCoverage []string  `json:"missing_coverage,omitempty"`
+	// Provenance records how a probabilistic verdict was produced — model
+	// id, prompt hash, effort. Without it an advisory finding is a score
+	// with no way to audit or reproduce it (ADR-001 §6).
+	Provenance map[string]string `json:"provenance,omitempty"`
 }
 
 // Blocks reports whether this verdict should fail the build. Only

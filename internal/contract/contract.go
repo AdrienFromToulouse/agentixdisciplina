@@ -74,9 +74,21 @@ type Plan struct {
 	Entries []Entry
 	Values  map[string]ValueSpec
 	Hash    string
+	baseDir string
 
 	Rego *regoeng.Engine
 	CUE  *cueeng.Evaluator
+}
+
+// NeedsJudge reports whether any clause in the plan uses the judge engine, so
+// the runner can skip constructing one when nothing needs it.
+func (p *Plan) NeedsJudge() bool {
+	for _, e := range p.Entries {
+		if e.Kind.Engine == "judge" {
+			return true
+		}
+	}
+	return false
 }
 
 type Entry struct {
@@ -109,10 +121,11 @@ func Compile(doc *Document, baseDir string) (*Plan, error) {
 		return nil, err
 	}
 	p := &Plan{
-		Name:   doc.Metadata.Name,
-		Values: map[string]ValueSpec{},
-		Rego:   rg,
-		CUE:    cueeng.NewEvaluator(),
+		Name:    doc.Metadata.Name,
+		Values:  map[string]ValueSpec{},
+		baseDir: baseDir,
+		Rego:    rg,
+		CUE:     cueeng.NewEvaluator(),
 	}
 	if p.Name == "" {
 		p.Name = "contract"
@@ -324,6 +337,14 @@ func (p *Plan) add(c Clause) error {
 	k := Lookup(c.Kind)
 	if k == nil {
 		return unknownClauseError(c)
+	}
+	// Inline the rubric at compile time so a missing file fails at load,
+	// not halfway through a run.
+	if err := resolveRubricFile(c.Params, func(path string) (string, error) {
+		b, err := os.ReadFile(filepath.Join(p.baseDir, path))
+		return string(b), err
+	}); err != nil {
+		return fmt.Errorf("%s: %w", c.Source, err)
 	}
 	if err := k.validate(c); err != nil {
 		return fmt.Errorf("%s: %w", c.Source, err)

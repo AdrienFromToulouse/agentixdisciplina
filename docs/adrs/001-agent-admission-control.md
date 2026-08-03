@@ -190,7 +190,9 @@ Every verdict carries a class:
 
 The reasoning is operational rather than philosophical. An evaluation tool that turns CI red on a rerun with no code change gets disabled within a month, and then the org has a policy bundle nobody enforces. Determinism is the property that makes this gateable at all, so the default must protect it.
 
-Advisory does not mean unactionable. Judge verdicts carry `model_id`, `prompt_hash`, `temperature`, and the raw judge output as evidence, so a failing quality signal can be reviewed and, if it proves stable, promoted to blocking.
+Advisory does not mean unactionable. Judge verdicts carry `model_id`, `prompt_hash`, `effort`, and the judge's own reasoning as evidence, so a failing quality signal can be reviewed and, if it proves stable, promoted to blocking.
+
+> **Correction (2026-08-03).** This section originally named `temperature` as the recorded provenance field. That parameter is rejected outright by current frontier models — `temperature`, `top_p`, and `top_k` return a 400 on Claude Opus 5 — so there is no temperature to record. The reproducibility knob is `output_config.effort`, and that is what the implementation stores. Verdicts are additionally cached by `(model, effort, prompt hash)`, which is what makes repeated runs over an unchanged trace stable in practice without pretending a judge is deterministic.
 
 Report schema `axda.dev/report/v1`:
 

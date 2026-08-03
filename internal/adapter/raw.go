@@ -175,6 +175,7 @@ func BuildEpisode(spans []RawSpan, adapterName string) (*episode.Episode, error)
 				seenTurn[key] = true
 				ep.Turns = append(ep.Turns, episode.Turn{
 					Index: len(ep.Turns), Role: role, Text: text, Captured: true,
+					StartedAt: s.StartNano,
 					Span: episode.SpanRef{TraceID: s.TraceID, SpanID: s.SpanID, Name: s.Name,
 						Path: fmt.Sprintf("turns[%d].text", len(ep.Turns))},
 				})
@@ -182,6 +183,7 @@ func BuildEpisode(spans []RawSpan, adapterName string) (*episode.Episode, error)
 			if !okIn && !okOut {
 				ep.Turns = append(ep.Turns, episode.Turn{
 					Index: len(ep.Turns), Role: "assistant", Captured: false,
+					StartedAt: s.StartNano,
 					Span: episode.SpanRef{TraceID: s.TraceID, SpanID: s.SpanID, Name: s.Name,
 						Path: fmt.Sprintf("turns[%d]", len(ep.Turns))},
 				})

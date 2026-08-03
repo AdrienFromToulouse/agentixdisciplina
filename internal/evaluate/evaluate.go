@@ -9,7 +9,9 @@ import (
 
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/adapter"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/contract"
+	"github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/judge"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/episode"
+	"github.com/AdrienFromToulouse/agentixdisciplina/internal/extract"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/report"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/verdict"
 )
@@ -17,6 +19,9 @@ import (
 type Options struct {
 	Evidence      verdict.EvidenceMode
 	FailOnSkipped bool
+	// Judge is nil when judges are disabled; clauses that need one then
+	// report SKIPPED rather than failing.
+	Judge *judge.Judge
 }
 
 func Run(plan *contract.Plan, ep *episode.Episode, opts Options) *report.Report {
@@ -48,6 +53,13 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 		r.Notice = "episode reconstructed from X-Ray segments: attributes may be truncated and this report must not gate a build"
 	}
 
+	// Claims are inferred, not read, so they are extracted here rather than
+	// by the adapter — and the structural extractor is deterministic, which
+	// is what lets grounding clauses block (ADR-002 §4).
+	if len(ep.Claims) == 0 {
+		ep.Claims = extract.Structural(ep)
+	}
+
 	// The Episode is marshalled once and shared with every Rego clause;
 	// values are bound once and shared with every invariant.
 	epJSON, jsonErr := episodeJSON(ep)
@@ -74,7 +86,11 @@ func RunContext(ctx context.Context, plan *contract.Plan, ep *episode.Episode, o
 			continue
 		}
 
-		findings, err := runClause(ctx, e, ep, epJSON, bindings, plan, opts.Evidence, jsonErr)
+		provenance := map[string]string{}
+		findings, err := runClause(ctx, e, ep, epJSON, bindings, plan, opts, provenance, jsonErr)
+		if len(provenance) > 0 {
+			v.Provenance = provenance
+		}
 
 		// A clause may decide at runtime that its inputs are absent.
 		var skip *contract.SkipError
@@ -139,7 +155,8 @@ func runClause(
 	epJSON map[string]any,
 	bindings map[string]contract.Binding,
 	plan *contract.Plan,
-	mode verdict.EvidenceMode,
+	opts Options,
+	provenance map[string]string,
 	jsonErr error,
 ) (out []verdict.Finding, err error) {
 	defer func() {
@@ -157,9 +174,11 @@ func runClause(
 		EpisodeJSON: epJSON,
 		Clause:      e.Clause,
 		Bindings:    bindings,
-		Evidence:    mode,
+		Evidence:    opts.Evidence,
 		Rego:        plan.Rego,
 		CUE:         plan.CUE,
+		Judge:       opts.Judge,
+		Provenance:  provenance,
 	})
 }
 

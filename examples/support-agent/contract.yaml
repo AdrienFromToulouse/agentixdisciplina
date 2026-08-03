@@ -72,6 +72,14 @@ spec:
     - kind: budget.max_tokens
       value: 50000
 
+    # Deterministic: claims are extracted structurally (ADR-002 §4), so a
+    # grounding verdict can block the build.
+    - kind: grounding.cite_sources
+      min_support: 1
+
+    # Probabilistic: advisory unless the clause sets blocking: true.
+    - kind: quality.helpful
+
   must_not:
     # Sending an address to email.send is the job. Policies express where PII
     # may travel, not merely whether it appears (ADR-003 §2).

@@ -3,6 +3,7 @@ package detect
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -99,6 +100,34 @@ func Mask(m Match) string {
 		}
 	}
 	return "[redacted:" + m.Type + "]"
+}
+
+// MaskAll replaces every detectable PII value in a free-text excerpt.
+//
+// Used where the excerpt is raw agent output rather than a specific match — a
+// claim, for instance — so a finding about something else does not carry a
+// card number out with it. It cannot catch what it cannot detect: an excerpt
+// is still model output, and `--evidence=none` is the lever for environments
+// where that is unacceptable.
+func MaskAll(text string) string {
+	matches := PII(text, KnownPIITypes())
+	if len(matches) == 0 {
+		return text
+	}
+	// Rebuild left to right, skipping overlaps.
+	sort.Slice(matches, func(i, j int) bool { return matches[i].Start < matches[j].Start })
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		if m.Start < last {
+			continue
+		}
+		b.WriteString(text[last:m.Start])
+		b.WriteString(Mask(m))
+		last = m.End
+	}
+	b.WriteString(text[last:])
+	return b.String()
 }
 
 // Excerpt renders a bounded window of text around a match, applying the

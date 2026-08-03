@@ -10,6 +10,7 @@ import (
 
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/detect"
 	cueeng "github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/cue"
+	"github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/judge"
 	regoeng "github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/rego"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/episode"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/verdict"
@@ -41,6 +42,11 @@ type EvalContext struct {
 	Evidence    verdict.EvidenceMode
 	Rego        *regoeng.Engine
 	CUE         *cueeng.Evaluator
+	Judge       *judge.Judge
+	// Provenance is a per-clause scratch map the runner copies onto the
+	// verdict. Probabilistic clauses write their model id, prompt hash,
+	// and effort here.
+	Provenance map[string]string
 }
 
 // Kind is a registered clause definition.

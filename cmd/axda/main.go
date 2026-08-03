@@ -14,6 +14,7 @@ import (
 
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/adapter"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/contract"
+	"github.com/AdrienFromToulouse/agentixdisciplina/internal/engine/judge"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/episode"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/evaluate"
 	"github.com/AdrienFromToulouse/agentixdisciplina/internal/fetch"
@@ -40,6 +41,14 @@ evaluate flags:
   --fail-on-skipped      treat unevaluable clauses as failures
   --json                 emit the machine-readable report
   --no-color             disable ANSI colour
+
+judge flags (LLM judges are advisory: they never fail the build unless a
+clause sets blocking: true, and they SKIP when no credentials are found):
+  --judge                run judges even if ANTHROPIC_API_KEY is not set
+  --no-judge             skip every judge clause
+  --judge-model M        default claude-opus-5
+  --judge-effort E       low (default) | medium | high | xhigh | max
+  --no-judge-cache       do not read or write .axda/judge-cache.json
 
 fetch flags:
   --region R             AWS region (defaults to the ambient config)
@@ -92,6 +101,11 @@ type flags struct {
 	failOnSkipped bool
 	jsonOut       bool
 	noColor       bool
+	judgeOn       bool
+	judgeOff      bool
+	judgeModel    string
+	judgeEffort   string
+	noJudgeCache  bool
 }
 
 // parse is a small hand-rolled flag reader so `axda trace fetch` reads as a
@@ -150,6 +164,18 @@ func parse(args []string) (*flags, error) {
 			if v, err = next(); err == nil {
 				f.wait, err = time.ParseDuration(v)
 			}
+		case "--judge-model":
+			v, err = next()
+			f.judgeModel = v
+		case "--judge-effort":
+			v, err = next()
+			f.judgeEffort = v
+		case "--judge":
+			f.judgeOn = true
+		case "--no-judge":
+			f.judgeOff = true
+		case "--no-judge-cache":
+			f.noJudgeCache = true
 		case "--raw":
 			f.raw = true
 		case "--fail-on-skipped":
@@ -207,10 +233,31 @@ func cmdEvaluate(args []string) error {
 		return err
 	}
 
-	rep := evaluate.Run(plan, ep, evaluate.Options{
+	opts := evaluate.Options{
 		Evidence:      verdict.EvidenceMode(f.evidence),
 		FailOnSkipped: f.failOnSkipped,
-	})
+	}
+	if plan.NeedsJudge() && !f.judgeOff {
+		if f.judgeEffort != "" && !judge.ValidEffort(f.judgeEffort) {
+			return fmt.Errorf("--judge-effort must be low, medium, high, xhigh, or max")
+		}
+		j := judge.New(judge.Config{
+			Model:   f.judgeModel,
+			Effort:  f.judgeEffort,
+			NoCache: f.noJudgeCache,
+			Enabled: f.judgeOn,
+		})
+		opts.Judge = j
+		// Persisting the cache is best-effort: the report is already
+		// correct without it.
+		defer func() {
+			if err := j.Flush(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not write judge cache: %v\n", err)
+			}
+		}()
+	}
+
+	rep := evaluate.Run(plan, ep, opts)
 
 	if f.jsonOut {
 		if err := rep.JSON(os.Stdout); err != nil {
