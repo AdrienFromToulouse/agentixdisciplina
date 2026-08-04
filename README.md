@@ -4,13 +4,13 @@
 
 <h1 align="center">axda</h1>
 
-<p align="center"><em>Agent Admission Control: out-of-band evaluation for AI agents.</em></p>
+<p align="center"><em>Out-of-band evaluation for AI agents.</em></p>
 
 ---
 
 `axda` reads a recorded agent trace, checks it against a contract, and emits a reliability score, a violation list, and span-anchored evidence.
 
-The agent never knows it exists. No SDK, no callback, no middleware, no import: the only coupling is the OpenTelemetry trace the agent already emits. The same relationship Kubernetes admission controllers have to pods, and CI security scanners have to application code.
+The agent never knows it exists. No SDK, no callback, no middleware, no import: the only coupling is the OpenTelemetry trace the agent already emits.
 
 ```
 axda evaluate --contract agent.yaml --trace trace.json
@@ -83,6 +83,8 @@ The split is by question shape, not a hard domain wall: Rego answers quantified 
 
 ## Install
 
+Build from source (Go 1.26, no CGO, single static binary):
+
 ```bash
 go build -o axda ./cmd/axda
 ```
@@ -96,23 +98,27 @@ go build -o axda ./cmd/axda
 ```
 
 ```
-support-agent · 8 clauses · score 0.30 · FAIL
+support-agent · 13 clauses · score 0.27 · FAIL
 episode f3b5dec05a71… · adapter otlp/v1.41 · 8 spans · 4 tool calls · 7 turns
 
   FAIL  tool.allowlist                     critical  1 violation(s)
         └ tool "internal.debug_dump" is not in the allowed set
           tool_calls[2] · span 0000000000000005
+  FAIL  invariants[0]                      critical  1 violation(s)
+        └ invariant "refund.amount <= approved_limit" does not hold where approved_limit=500, refund.amount=900
+          tool_calls[1] · span 0000000000000004
   FAIL  order.requires_precondition        critical  1 violation(s)
         └ "billing.refund" ran with no completed "crm.verify_identity" before it
           tool_calls[1] · span 0000000000000004
   FAIL  must_not.content.no_pii            critical  1 violation(s)
         └ card exposed in assistant turn
-          The refund went back to your Visa [redacted:card ****4242]. You should…
+          The refund went back to your Visa [redacted:card ****4242]. You should see it in 3-5 business days.
           turns[4].text · span 0000000000000007
-  PASS  tool.call_limit                    major     ok
   ...
+  SKIP  quality.helpful                    minor     needs: no judge credentials found; set ANTHROPIC_API_KEY or pass --judge to force (advisory)
+  PASS  tool.call_limit                    major     ok
 
-  3 passed · 5 failed · 0 skipped · 0 errored
+  4 passed · 8 failed · 1 skipped · 0 errored
 ```
 
 Exit codes: `0` pass · `1` blocking violation · `2` contract or trace error.
@@ -264,10 +270,11 @@ Specified in the ADRs, absent from the binary:
 - **`from: claim_value` value bindings**, which would let an invariant read an extracted fact ([ADR-003 §4](docs/adrs/003-contract-lowering.md)).
 - **Policy bundles**: v0 takes `--contract FILE`, and custom clauses live in the contract rather than in bundle metadata. Git and OCI resolution, lockfiles, and signing are [ADR-001 §7](docs/adrs/001-agent-admission-control.md) and [ADR-006](docs/adrs/006-oci-distribution.md).
 - **WASM plugins** ([ADR-004](docs/adrs/004-wasm-plugin-abi.md)) and the **inline admission gate** ([ADR-005](docs/adrs/005-inline-admission-gate.md)).
+- **ReBAC authorization clauses**: `spec.authz`, `authz.tool_permitted` / `authz.recheck`, and the SpiceDB-backed checker ([ADR-009](docs/adrs/009-rebac-authorization-clauses.md)).
 - `axda test`, `axda lint`, SARIF and JUnit reporters.
 - **`must_not` polarity inversion.** Every registered kind is a violation predicate and aliases carry the polarity (`expose_pii` → `content.no_pii`), so position sets severity defaults rather than inverting a clause ([ADR-003 §3](docs/adrs/003-contract-lowering.md)).
 
-Embedding OPA and CUE costs real weight: the binary is ~47 MB and evaluation takes ~40 ms per run, most of it one-time Rego compilation.
+Embedding OPA and CUE costs real weight: the binary is ~62 MB and evaluation takes ~40 ms per run, most of it one-time Rego compilation.
 
 ## Documentation
 
@@ -286,6 +293,8 @@ The architecture is settled in [docs/adrs](docs/adrs/summary.md): read [the inde
 | [005](docs/adrs/005-inline-admission-gate.md) | Inline admission gate |
 | [006](docs/adrs/006-oci-distribution.md) | OCI bundle distribution and signing |
 | [007](docs/adrs/007-agentcore-trace-acquisition.md) | Trace acquisition from AWS Bedrock AgentCore |
+| [008](docs/adrs/008-verbatim-gated-extraction.md) | Verbatim-gated fact extraction |
+| [009](docs/adrs/009-rebac-authorization-clauses.md) | ReBAC authorization clauses backed by SpiceDB |
 
 ## Tests
 

@@ -488,11 +488,9 @@ func (p *Plan) Explain() string {
 		fmt.Fprintf(&b, "    ├─ engine    %s\n", e.Kind.Engine)
 		fmt.Fprintf(&b, "    ├─ class     %-16s blocking: %-4t severity: %s\n",
 			e.Kind.Class, e.Clause.Blocking, e.Clause.Severity)
-		req := ", "
 		if len(e.Kind.Requires) > 0 {
-			req = strings.Join(e.Kind.Requires, ", ")
+			fmt.Fprintf(&b, "    ├─ requires  %s\n", strings.Join(e.Kind.Requires, ", "))
 		}
-		fmt.Fprintf(&b, "    ├─ requires  %s\n", req)
 		fmt.Fprintf(&b, "    ├─ reads     %s\n", e.Kind.Reads)
 		fmt.Fprintf(&b, "    └─ inline    %s\n\n", inlineLabel(e.Kind.PrefixDecidable))
 	}

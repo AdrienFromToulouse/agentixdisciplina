@@ -34,13 +34,13 @@ This guide covers everything you need to use the tool: writing a contract, feedi
 
 ## Install and quickstart
 
-Build from source (Go 1.25, no CGO, single static binary):
+Build from source (Go 1.26, no CGO, single static binary):
 
 ```bash
 go build -o axda ./cmd/axda
 ```
 
-The repository ships a worked example: a support-agent contract plus three recorded traces (clean, violating, and content-stripped). Print the evaluation plan, then evaluate the violating trace:
+The repository ships a worked example: a support-agent contract plus three recorded traces (clean, violating, and no-content). Print the evaluation plan, then evaluate the violating trace:
 
 ```bash
 ./axda explain  --contract examples/support-agent/contract.yaml
@@ -715,7 +715,7 @@ Operational details:
 
 - **IAM**: the caller needs `logs:FilterLogEvents` on the log group.
 - **Region**: `--region`, or the ambient AWS config / `AWS_REGION`. Neither set is an error.
-- **`--since`** (default `2h`) bounds the query window: CloudWatch bills by data scanned, so the window is mandatory. If nothing is found, the error asks the three right questions: is Transaction Search enabled, is `--since` long enough, and does this agent deliver spans to its own log group?
+- **`--since`** (default `24h`) bounds the query window: CloudWatch bills by data scanned, so the window is mandatory. If nothing is found, the error asks the three right questions: is Transaction Search enabled, is `--since` long enough, and does this agent deliver spans to its own log group?
 - **`--log-stream spans`** on a per-agent log group keeps the query off the agent's stdout and `otel-rt-logs` streams. Same span set, less scanned.
 - **`--wait`** (default `30s`) polls until the span set stops growing, because spans for a live session trickle in. A trace fetched before it settled is flagged `stable: false`.
 
@@ -757,10 +757,11 @@ Specified in the ADRs, absent from the binary:
 - **`from: claim_value` bindings**, which would let an invariant read an extracted fact.
 - **Policy bundles**: v0 takes `--contract FILE`, and custom clauses live in the contract. Git and OCI resolution, lockfiles, and signing are [ADR-006](adrs/006-oci-distribution.md).
 - **WASM plugins** ([ADR-004](adrs/004-wasm-plugin-abi.md)) and the **inline admission gate** ([ADR-005](adrs/005-inline-admission-gate.md)).
+- **ReBAC authorization clauses**: `spec.authz`, `authz.tool_permitted` / `authz.recheck`, and the SpiceDB-backed checker ([ADR-009](adrs/009-rebac-authorization-clauses.md)).
 - `axda test`, `axda lint`, SARIF and JUnit reporters.
 - **`must_not` polarity inversion**: every registered kind is a violation predicate and aliases carry the polarity (`expose_pii` → `content.no_pii`), so position sets severity defaults rather than inverting a clause.
 - Fetch sources other than CloudWatch (`--from cloudwatch` is the only one), and cost-based budgets (no pricing table).
 
-Embedding OPA and CUE costs real weight: the binary is ~47 MB and evaluation takes ~40 ms per run, most of it one-time Rego compilation.
+Embedding OPA and CUE costs real weight: the binary is ~62 MB and evaluation takes ~40 ms per run, most of it one-time Rego compilation.
 
 Status: pre-alpha. The contract surface, report schema, and Episode model follow the [ADRs](adrs/summary.md) and are meant to be stable; everything else moves.
